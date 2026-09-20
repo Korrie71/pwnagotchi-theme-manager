@@ -6,7 +6,7 @@ import os
 import threading
 import time
 
-from _util import Panel, T, finish, new_manager, ok, panel, press_burst, sandbox
+from _util import Panel, T, finish, new_manager, ok, panel, press_burst, sandbox, swipe_burst
 from PIL import Image
 
 sandbox()
@@ -106,6 +106,69 @@ tm.open_menu("list")
 before = dict(tm._menu)
 finger.tap(240, 264)                                    # the gap between the last row and the buttons
 ok("a tap in a gap does nothing and keeps the menu open", tm._menu is not None and tm._menu["page"] == before["page"] and not tm.applied[len(tm.applied):])
+
+# ---------------------------------------------------------------- swipes change theme
+tm, finger = fresh(calibrated=True)
+tm._menu = None
+names = list(T.BUILTIN)
+tm._active = names[3]
+tm.applied.clear()
+finger.swipe(380, 160, 120, 160)
+ok("swiping left goes to the next theme", tm.applied == [names[4]], tm.applied)
+ok("...and shows the new theme's name for a moment", tm._toast and tm._toast[0] == names[4])
+tm._active = names[4]
+finger.swipe(120, 160, 380, 160)
+ok("swiping right goes to the previous theme", tm.applied[-1] == names[3], tm.applied)
+tm._active = names[0]
+finger.swipe(120, 160, 380, 160)
+ok("...and wraps around at the start of the list", tm.applied[-1] == names[-1])
+tm._active = names[-1]
+finger.swipe(380, 160, 120, 160)
+ok("...and at the end", tm.applied[-1] == names[0])
+n = len(tm.applied)
+finger.swipe(240, 50, 240, 280)
+ok("a vertical swipe does nothing", len(tm.applied) == n and tm._menu is None)
+finger.swipe(200, 160, 250, 160)
+ok("a short movement is not a swipe", len(tm.applied) == n)
+finger.swipe(300, 60, 200, 280)
+ok("a diagonal swipe that is mostly vertical does nothing", len(tm.applied) == n)
+finger.swipe(380, 160, 120, 160, dur=2.0)
+ok("a slow drag is not a swipe either", len(tm.applied) == n)
+finger.t += 3
+swipe_burst(tm, 380, 160, 120, 160, finger.t)
+swipe_burst(tm, 380, 160, 120, 160, finger.t + 0.5)
+ok("two swipes within a second only change theme once", len(tm.applied) == n + 1, tm.applied[n:])
+tm.open_menu("list")
+n = len(tm.applied)
+finger.swipe(380, 160, 120, 160)
+ok("with the menu open a swipe does nothing", len(tm.applied) == n and tm._menu is not None)
+tm._menu = None
+tm._touch_m = None
+tm._last_tap = None
+finger.swipe(380, 160, 120, 160)
+ok("before calibration a swipe is ignored (and is not mistaken for a tap)", len(tm.applied) == n and tm._menu is None and tm._last_tap is None)
+tm._touch_m = json.load(open(T.TOUCH_FILE))["matrix"]
+tm.feed(T.EV_KEY, T.BTN_TOUCH, 1, 900.0)
+for i in range(4):
+    tm.feed(T.EV_ABS, T.ABS_X, 2000 + 60 * i, 900.0 + i * .01)
+    tm.feed(T.EV_ABS, T.ABS_Y, 2000, 900.0 + i * .01)
+    tm.feed(T.EV_SYN, 0, 0, 900.0 + i * .01)
+tm.feed(T.EV_KEY, T.BTN_TOUCH, 0, 900.1)
+ok("a tap with a little finger drift is still a tap", tm._last_tap is not None and tm._last_tap[0] == 900.1)
+tm._toast = ("hello", 1000.0)
+tm._refresh_now = lambda: None
+tm.menu_tick(1001.0)
+ok("the toast goes away by itself", tm._toast is None)
+before = tm._compose(1.0) if tm._ctx else None
+tm._ctx = {"canvas": Image.new("1", (480, 320), 0), "layers": {}, "face": None}
+plain = tm._compose(1.0)
+tm._toast = ("cyberpunk", 9e9)
+with_toast = tm._compose(1.0)
+ok("the toast is drawn on the frame", plain.tobytes() != with_toast.tobytes())
+tm._toast = ("a" * 200, 9e9)
+tm._compose(1.0)
+ok("an over-long toast text still draws", True)
+tm._toast = None
 
 # ---------------------------------------------------------------- drawing
 for theme_name in ("cyberpunk", "paper", "gameboy", "default", "matrix"):

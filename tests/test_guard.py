@@ -157,4 +157,58 @@ m._next_guard = 0
 m._guard_tick(500.0)
 ok("_guard_tick runs the GPS check and schedules the next one", m._view._agent.commands and m._next_guard == 530.0, m._next_guard)
 
+# ---------------------------------------------------------------- the on-screen warning banner
+ok("no problems: no banner", T.warning_text(False, 50.0) == "" and T.warning_text(False, None) == "")
+ok("low power", T.warning_text(True, 50.0) == "LOW POWER")
+ok("heat shows the temperature", T.warning_text(False, 77.6) == "HOT 78C")
+ok("both problems on one banner", T.warning_text(True, 76.0) == "LOW POWER  HOT 76C")
+ok("the banner starts at the slow-down temperature", T.warning_text(False, 74.9) == "" and T.warning_text(False, 75.0) == "HOT 75C")
+plain = Image.new("RGB", (480, 320), (0, 0, 0))
+banner = Image.new("RGB", (480, 320), (0, 0, 0))
+T.draw_banner(banner, "LOW POWER  HOT 99C")
+ok("the banner is drawn, red, at the top centre", plain.tobytes() != banner.tobytes() and banner.getpixel((240, 20)) in ((190, 30, 30), (255, 255, 255)))
+T.draw_banner(Image.new("RGB", (480, 320)), "x" * 80)
+ok("an absurdly long banner text still draws", True)
+
+tm, ui, els = new_manager()
+tm._touch_m = None
+states = {"power": "OK"}
+T._power_state = lambda: states["power"]
+open(temp_file, "w").write("60000\n")
+T.cpu_temp.__defaults__ = (temp_file,)
+tm._next_guard = 1e18
+tm._next_temp = tm._next_power = 0
+tm._guard_tick(1000.0)
+ok("all fine: no banner", tm._warn == "")
+states["power"] = "LOW"
+tm._next_power = 0
+n = tm.redraws[0]
+tm._guard_tick(1002.0)
+ok("under-voltage shows LOW POWER and redraws", tm._warn == "LOW POWER" and tm.redraws[0] > n, tm._warn)
+states["power"] = "OK"
+tm._next_power = 0
+tm._guard_tick(1006.0)
+ok("...and it stays for a few seconds after the reading goes away", tm._warn == "LOW POWER")
+tm._next_power = 0
+tm._guard_tick(1013.0)
+ok("...then it disappears", tm._warn == "")
+open(temp_file, "w").write("78000\n")
+tm._next_temp = 0
+tm._guard_tick(1020.0)
+ok("a hot CPU shows HOT with the temperature", tm._warn == "HOT 78C", tm._warn)
+tm._theme = T._clean(dict(T.BUILTIN["default"], warnings=False))
+tm._next_temp = 0
+tm._guard_tick(1030.0)
+ok("a theme with \"warnings\": false hides the banner", tm._warn == "")
+ok("the warnings option is validated as a flag", T._clean(dict(T.BUILTIN["default"], warnings=0))["warnings"] is False
+   and "warnings" not in T._clean(T.BUILTIN["default"]))
+tm._theme = T._clean(T.BUILTIN["default"])
+tm._warn = "LOW POWER"
+tm._ctx = {"canvas": Image.new("1", (480, 320), 0), "layers": {}, "face": None}
+tm._rot = 0
+with_banner = tm._compose(1.0)
+tm._warn = ""
+without = tm._compose(1.0)
+ok("the composed frame contains the banner", with_banner.tobytes() != without.tobytes())
+
 finish()

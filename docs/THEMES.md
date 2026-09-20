@@ -227,6 +227,18 @@ Buttons: **Save** stores the theme under the name in the box (built-in themes ca
 **Apply to screen** saves if needed and makes it the active theme, **Export** downloads the JSON,
 **Import** loads a JSON file into the editor (press Save to keep it), **Delete** removes a custom theme.
 
+**Try 30 s** shows the theme you are editing on the real screen for 30 seconds and then goes back to the saved one
+(the button counts down). Nothing is saved, so a bad idea can never be left on the screen; **Apply to screen** keeps it.
+
+Under the **JSON** tab, **Import from a link** loads a theme from a `https://` link (a github.com page link is turned into
+the raw file automatically); check the preview, then Save. Under the **Faces** tab you can **upload face images**: name
+each file after a mood (`happy.png`, `sad.png`, `default.png`, animated `awake.gif` ...), choose a pack name, and they are
+resized to fit and stored in that pack (max 1 MB each; `Delete this pack` removes it again). At the bottom of the page,
+**Download all my themes and faces** makes a backup zip and **Restore from a backup** puts one back (existing themes are
+kept unless you tick "replace what is already there"; built-in names and anything that is not a theme or face are ignored).
+
+If the editor loses its session (for example after pwnagotchi restarts) it fetches a new one by itself and carries on.
+
 ## Touch menu
 
 Double tap the screen (two quick taps in about the same place) and a menu with all your themes appears. Tap a theme
@@ -253,7 +265,11 @@ tap cancels it. `restart` restarts pwnagotchi in the current mode, `Mode` restar
 
 `refresh` needs no confirmation: it flashes the panel black and writes the whole screen again. Use it when the display
 looks garbled or stuck (the plugin normally sends only the rows that changed, so a glitch on the panel can otherwise
-stay until that spot changes).
+stay until that spot changes). `dim` cycles the brightness 100% / 60% / 30% (see "Brightness and night mode").
+
+**Swipe:** on the bare screen (no menu open), swipe sideways to change theme: left goes to the next theme, right to the
+previous one, and the new theme's name shows for a moment. It needs the calibration, and only clearly sideways swipes
+count, so taps, vertical swipes and slow drags are ignored.
 
 It costs nothing while idle: one small thread sleeps until the screen is touched. Menu and calibration screens are drawn
 with the active theme's colors, so custom themes get a matching menu automatically.
@@ -261,6 +277,29 @@ with the active theme's colors, so custom themes get a matching menu automatical
 If nothing happens, check `journalctl`-style output in `/etc/pwnagotchi/log/pwnagotchi.log` for `theme_manager`:
 `touch menu ready on /dev/input/eventN` means the touch reader is running, `double tap: opening the theme menu` means
 the gesture was recognised. No touchscreen found means the menu is simply disabled.
+
+## Brightness and night mode
+
+The panel has no backlight control, so the plugin dims the picture itself. Set it with the `dim` button on the System tab,
+or with the command line (settings live in `/etc/pwnagotchi/themes/display.json` and are picked up within a second):
+
+```bash
+P="sudo /opt/.pwn/bin/python3 /etc/pwnagotchi/custom-plugins/theme_manager.py"
+$P dim 60                 # brightness, 5-100 %
+$P night 22:00 07:00 30   # 30 % between 22:00 and 07:00 (the window may cross midnight)
+$P night off
+$P idle 5 25              # 25 % after 5 minutes without a touch
+$P idle off
+```
+
+The screen uses the dimmest of the three that apply. With idle dimming on, the first touch only wakes the screen (it is
+not treated as a tap, so you cannot press a button by accident on a dark screen).
+
+## Warnings on the screen
+
+A red banner at the top centre says **LOW POWER** while the Pi reports under-voltage (it stays for 10 seconds after the last
+reading) and **HOT nnC** from 75 C up. It is the same on every theme so it cannot be missed. A theme can switch it off
+with `"warnings": false`.
 
 ## Keeping it cool
 

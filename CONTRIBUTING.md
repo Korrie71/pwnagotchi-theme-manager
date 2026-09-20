@@ -35,6 +35,8 @@ python tests/run_all.py
   change, and make sure `python tests/run_all.py` passes.
 - The plugin is a single file (`theme_manager.py`) on purpose: pwnagotchi loads plugins as single files, and that keeps
   installing it to one copy.
+- `tests/e2e_editor.py` drives the web editor in a real (headless) browser against a running plugin; it is not part of
+  `run_all.py` because it needs a Pi and Playwright (see the top of that file).
 - Things the tests cannot cover need a real device: the framebuffer output, the touch controller, and the web editor
   in a browser. Say in your pull request what you tried on real hardware.
 - `python tools/make_screenshots.py` and `python tools/make_demo.py` regenerate the README images.

@@ -1,5 +1,24 @@
 # Changelog
 
+## 2.2.0
+
+**On the screen**
+- **Swipe** sideways on the bare screen to change theme; the new theme's name shows for a moment
+- **Night mode and dimming:** a `dim` button on the System tab (100/60/30 %), a night window, and idle dimming where the
+  first touch only wakes the screen. Settings in `display.json`, CLI: `dim`, `night`, `idle`
+- **Warning banner** for low power (under-voltage) and heat (75 C and up); a theme can turn it off with `"warnings": false`
+
+**Web editor**
+- **Try 30 s:** show the theme being edited on the real screen, then go back by itself (nothing is saved)
+- **Import from a link** (github.com page links are converted to the raw file)
+- **Backup and restore** of all themes and face packs as one zip, with strict checks on what is restored
+- **Upload face images** per mood in the browser (resized, gifs keep their animation) and delete packs
+- Recovers by itself when the session is lost after pwnagotchi restarts
+
+**Under the hood**
+- A text line without a string `text` is rejected; `THEME_MANAGER_DIR` can point the plugin at another folder (for testing)
+- 380+ automated checks plus a real-browser test of the editor (`tests/e2e_editor.py`)
+
 ## 2.1.0
 
 - **System tab: `refresh`.** Flashes the panel and writes the whole screen again, to clear a garbled or stuck display

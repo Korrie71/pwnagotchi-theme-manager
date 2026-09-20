@@ -22,6 +22,8 @@ guide = read("docs/THEMES.md")
 tokens = set(re.findall(r"`\{(\w+)\}`", guide))
 ok("the guide documents every placeholder the plugin knows",
    {"name", "time", "date", "cpu", "temp", "mem", "uptime", "ip", "mode", "gps", "lat", "lon", "sats", "handshakes", "cracked", "session", "power", "battery"} <= tokens)
+ok("the guide documents brightness, warnings, swipe, try and backup",
+   all(w in guide for w in ("display.json", "warnings", "Swipe", "Try 30 s", "Download all my themes", "Import from a link")))
 effects = set(T.EFFECTS)
 ok("...and every effect", all("`%s`" % e in guide for e in effects), [e for e in effects if "`%s`" % e not in guide])
 ok("...and every mood", all("`%s`" % m in guide for m in T.MOODS), [m for m in T.MOODS if "`%s`" % m not in guide])

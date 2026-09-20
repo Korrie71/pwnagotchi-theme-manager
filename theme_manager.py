@@ -7,6 +7,9 @@ CLI (run with /opt/.pwn/bin/python3):
   theme_manager.py set NAME
   theme_manager.py new NAME            create a template theme to edit
   theme_manager.py mood NAME [seconds] force a mood to preview it (NAME=off to clear)
+  theme_manager.py dim PERCENT            screen brightness, 5-100
+  theme_manager.py night 22:00 07:00 30   dim to 30% at night (or: night off)
+  theme_manager.py idle 5 25              dim to 25% after 5 minutes without a touch (or: idle off)
   theme_manager.py validate FILE.json
   theme_manager.py preview NAME OUT.png [seconds]
 """
@@ -18,12 +21,15 @@ import random
 import contextlib
 import fcntl
 import glob
+import io
 import re
 import select
+import shutil
 import socket
 import struct
 import threading
 import time
+import zipfile
 
 import numpy as np
 from PIL import Image, ImageChops, ImageDraw, ImageFilter, ImageFont
@@ -55,7 +61,7 @@ def trim_memory():
             pass
 
 
-THEME_DIR = "/etc/pwnagotchi/themes"
+THEME_DIR = os.environ.get("THEME_MANAGER_DIR", "/etc/pwnagotchi/themes")   # the variable is for testing
 ACTIVE_FILE = os.path.join(THEME_DIR, "active.json")
 DOCS_FILE = os.path.join(THEME_DIR, "README.md")
 FRAME_PATH = "/var/tmp/pwnagotchi/pwnagotchi.png"
@@ -82,7 +88,7 @@ MOOD_FADE = 0.6    # seconds to blend between moods
 HANDSHAKE_FLASH = 4.0
 FORCE_FILE = os.path.join(THEME_DIR, "force_mood.json")
 FACES_DIR = os.path.join(THEME_DIR, "faces")
-STATE_FILES = ("active.json", "force_mood.json", "touch.json")   # JSON files in THEME_DIR that are not themes
+STATE_FILES = ("active.json", "force_mood.json", "touch.json", "display.json")   # JSON files in THEME_DIR that are not themes
 PACK_RE = re.compile(r"^[A-Za-z0-9_\-]{1,32}$")
 
 # Built-in themes. bg/fg/accent/web are required, everything else is optional.
@@ -279,6 +285,8 @@ def _clean_theme(theme):
         raise ValueError("text must be a list of at most %d lines" % TEXT_MAX)
     if texts:
         out["text"] = [_clean_text(t) for t in texts]
+    if "warnings" in theme:
+        out["warnings"] = bool(theme["warnings"])
     if theme.get("elements"):
         out["elements"] = _clean_elements(theme["elements"])
     moods = theme.get("mood") or {}
@@ -798,6 +806,135 @@ def list_packs():
     return out
 
 
+# ------------------------------------------------------------ backup, restore and face uploads
+BACKUP_MAX_BYTES = 20 * 1024 * 1024
+BACKUP_MAX_ENTRIES = 500
+THEME_MAX_BYTES = 256 * 1024
+FACE_MAX_BYTES = 1024 * 1024
+FACE_MAX_SIZE = (480, 320)
+FACE_NAMES = tuple(m for m in MOODS if m != "handshake") + ("default",)
+FACE_EXTS = (".png", ".gif", ".jpg", ".jpeg", ".webp")
+THEME_ENTRY = re.compile(r"themes/([A-Za-z0-9_\- ]{1,32})\.json")
+FACE_ENTRY = re.compile(r"faces/([A-Za-z0-9_\-]{1,32})/([a-z_]+)\.(png|gif)")
+
+
+def make_backup():
+    """A zip (as bytes) with the user's themes and face packs."""
+    buf = io.BytesIO()
+    with zipfile.ZipFile(buf, "w", zipfile.ZIP_DEFLATED) as z:
+        try:
+            for name in sorted(os.listdir(THEME_DIR)):
+                if name.endswith(".json") and name not in STATE_FILES and THEME_ENTRY.fullmatch("themes/" + name):
+                    z.write(os.path.join(THEME_DIR, name), "themes/" + name)
+        except OSError:
+            pass
+        for pack in list_packs():
+            for f in sorted(os.listdir(os.path.join(FACES_DIR, pack))):
+                if FACE_ENTRY.fullmatch("faces/%s/%s" % (pack, f)):
+                    z.write(os.path.join(FACES_DIR, pack, f), "faces/%s/%s" % (pack, f))
+    return buf.getvalue()
+
+
+def store_face(pack, filename, data, overwrite=True):
+    """Validate an uploaded image and save it as faces/<pack>/<mood>.png|gif. Returns 'added', 'replaced' or 'skipped'.
+    Raises ValueError with a reason for anything that is not a usable face."""
+    if not PACK_RE.fullmatch(str(pack)):
+        raise ValueError("pack names use letters, digits, _ and - (max 32)")
+    stem, ext = os.path.splitext(os.path.basename(str(filename)).lower())
+    if stem not in FACE_NAMES:
+        raise ValueError("%s: name the file after a mood (%s, ...) or 'default'" % (filename, ", ".join(FACE_NAMES[:4])))
+    if ext not in FACE_EXTS:
+        raise ValueError("%s: use png, gif, jpg or webp" % filename)
+    if len(data) > FACE_MAX_BYTES:
+        raise ValueError("%s: larger than %d KB" % (filename, FACE_MAX_BYTES // 1024))
+    try:
+        Image.open(io.BytesIO(data)).verify()
+        im = Image.open(io.BytesIO(data))
+        frames = getattr(im, "n_frames", 1)
+    except Exception:
+        raise ValueError("%s: not a readable image" % filename)
+    if im.width > FACE_MAX_SIZE[0] * 2 or im.height > FACE_MAX_SIZE[1] * 2 or frames > 60:
+        raise ValueError("%s: too big (max %dx%d, 60 frames)" % (filename, FACE_MAX_SIZE[0], FACE_MAX_SIZE[1]))
+    animated = ext == ".gif" and frames > 1
+    if animated and (im.width > FACE_MAX_SIZE[0] or im.height > FACE_MAX_SIZE[1]):
+        raise ValueError("%s: an animated gif must be at most %dx%d" % (filename, FACE_MAX_SIZE[0], FACE_MAX_SIZE[1]))
+    folder = os.path.join(FACES_DIR, pack)
+    target = os.path.join(folder, stem + (".gif" if animated else ".png"))
+    other = os.path.join(folder, stem + (".png" if animated else ".gif"))
+    existed = os.path.exists(target) or os.path.exists(other)
+    if existed and not overwrite:
+        return "skipped"
+    os.makedirs(folder, exist_ok=True)
+    tmp = target + ".%d.tmp" % os.getpid()
+    if animated:
+        with open(tmp, "wb") as fp:
+            fp.write(data)
+    else:
+        im = im.convert("RGBA")
+        im.thumbnail(FACE_MAX_SIZE)
+        im.save(tmp, "PNG")
+    os.replace(tmp, target)
+    if os.path.exists(other):
+        os.remove(other)          # a png and a gif for one mood would be confusing (the gif would win)
+    return "replaced" if existed else "added"
+
+
+def delete_pack(pack):
+    if not PACK_RE.fullmatch(str(pack)):
+        raise ValueError("bad pack name")
+    folder = os.path.join(FACES_DIR, pack)
+    if not os.path.isdir(folder) or os.path.islink(folder):
+        return False
+    shutil.rmtree(folder)
+    return True
+
+
+def restore_backup(data, overwrite=False):
+    """Put themes and face packs from a backup zip back. Only well-formed entries are read, and their names are matched
+    against strict patterns (never used as paths), so a hostile zip cannot write anywhere else. Returns a report."""
+    report = {"added": [], "skipped": [], "invalid": []}
+    if len(data) > BACKUP_MAX_BYTES:
+        raise ValueError("the backup is larger than %d MB" % (BACKUP_MAX_BYTES // 1024 // 1024))
+    try:
+        z = zipfile.ZipFile(io.BytesIO(data))
+    except zipfile.BadZipFile:
+        raise ValueError("that is not a zip file")
+    infos = [i for i in z.infolist() if not i.is_dir()]
+    if len(infos) > BACKUP_MAX_ENTRIES or sum(i.file_size for i in infos) > BACKUP_MAX_BYTES:
+        raise ValueError("the backup has too many or too large files")
+    for info in infos:
+        name = info.filename
+        theme, face = THEME_ENTRY.fullmatch(name), FACE_ENTRY.fullmatch(name)
+        try:
+            if (theme and info.file_size > THEME_MAX_BYTES) or (face and info.file_size > FACE_MAX_BYTES):
+                report["invalid"].append(name + " (too large)")      # checked before anything is read into memory
+                continue
+            if theme:
+                stem = theme.group(1)
+                if stem in BUILTIN:
+                    report["skipped"].append(name + " (a built-in name)")
+                    continue
+                cleaned = _clean(json.loads(z.read(info).decode("utf-8")))
+                path = os.path.join(THEME_DIR, stem + ".json")
+                if os.path.exists(path) and not overwrite:
+                    report["skipped"].append(name + " (already there)")
+                    continue
+                os.makedirs(THEME_DIR, exist_ok=True)
+                write_json(path, cleaned, indent=2)
+                report["added"].append(name)
+            elif face:
+                result = store_face(face.group(1), "%s.%s" % (face.group(2), face.group(3)), z.read(info), overwrite)
+                if result == "skipped":
+                    report["skipped"].append(name + " (already there)")
+                else:
+                    report["added"].append(name)
+            else:
+                report["invalid"].append(name + " (not a theme or face file)")
+        except (ValueError, UnicodeDecodeError, zipfile.BadZipFile) as e:
+            report["invalid"].append("%s (%s)" % (name, e))
+    return report
+
+
 def _mood_map():
     """face string -> mood name, from pwnagotchi's current face table."""
     import pwnagotchi.ui.faces as faces
@@ -925,12 +1062,20 @@ def frame_interval(theme, t):
 # Double tap on the screen opens a theme menu. The touch controller reports raw numbers, so the first time a
 # 4-point calibration maps them to screen pixels (saved in touch.json).
 TOUCH_FILE = os.path.join(THEME_DIR, "touch.json")
+DISPLAY_FILE = os.path.join(THEME_DIR, "display.json")
 EVENT = struct.Struct("@llHHi")            # struct input_event on 64-bit Linux (24 bytes)
 EV_SYN, EV_KEY, EV_ABS = 0, 1, 3
 BTN_TOUCH, ABS_X, ABS_Y = 0x14A, 0, 1
 DOUBLE_TAP_S = 0.6        # max time between the two taps
 DOUBLE_TAP_RAW = 900      # max distance between them, in raw units (range is 0-4095)
 TAP_MAX_S = 0.8           # longer presses are not taps
+SWIPE_RAW = 500           # a press that moves this far (raw units) is a swipe, not a tap
+SWIPE_PX = 90             # a swipe changes theme if it covers this many screen pixels, mostly sideways
+SWIPE_MAX_S = 1.2
+TOAST_S = 1.5
+TRY_MIN_S, TRY_MAX_S = 5, 600      # how long a temporary theme may be tried
+WARN_HOLD_S = 10             # a low-power banner stays this long after the last under-voltage reading
+DIM_STEPS = (1.0, 0.6, 0.3)     # what the dim button on the System tab cycles through
 MENU_TIMEOUT = 20.0
 CALIB_TIMEOUT = 60.0
 CALIB_POINTS = ((40, 40), (440, 40), (40, 280), (440, 280))
@@ -1010,7 +1155,8 @@ def menu_hits(menu):
     tabs = [(rect, ("tab", name)) for name, rect in TABS]
     common = [((220, 268, 320, 308), ("cal", None)), ((380, 268, 452, 308), ("close", None))] + tabs
     if tab == "system":
-        return [((28, 268, 118, 308), ("refresh", None)), ((28, 166, 452, 200), ("mode", None)), ((28, 208, 152, 248), ("power", "restart")),
+        return [((28, 268, 118, 308), ("refresh", None)), ((124, 268, 214, 308), ("dim", None)),
+                ((28, 166, 452, 200), ("mode", None)), ((28, 208, 152, 248), ("power", "restart")),
                 ((158, 208, 282, 248), ("power", "reboot")), ((288, 208, 412, 248), ("power", "shutdown"))] + common
     act = "pick" if tab == "themes" else "toggle"
     hits = [((28, 44 + i * 44, 452, 44 + i * 44 + 40), (act, n))
@@ -1079,15 +1225,108 @@ def draw_menu(img, menu, theme):
             d.text(((px0 + px1) // 2, (y0 + y1) // 2), "..." if busy else ("ERR" if bad else "ON" if on else "OFF"), font=_font(16, True),
                    fill=bg if on and not busy else fg, anchor="mm")
         else:
-            label = {"prev": "<", "next": ">", "cal": "calibrate", "close": "close", "refresh": "refresh"}[act]
+            label = {"prev": "<", "next": ">", "cal": "calibrate", "close": "close", "refresh": "refresh",
+                     "dim": "dim %d%%" % round(menu.get("dim", 1.0) * 100)}[act]
             d.rectangle(rect, fill=line, outline=acc, width=1)
             d.text(((x0 + x1) // 2, (y0 + y1) // 2), label, font=_font(16, True), fill=fg, anchor="mm")
 
 
 # --------------------------------------------------------------------- plugin
+def _clock(value, what):
+    m = re.fullmatch(r"([01]?\d|2[0-3]):([0-5]\d)", str(value).strip())
+    if not m:
+        raise ValueError("%s must be a time like 22:30" % what)
+    return int(m.group(1)) * 60 + int(m.group(2))
+
+
+def clean_display(cfg):
+    """Validated display settings: {dim, night: None | {from, to, dim}, idle: None | {minutes, dim}}."""
+    if not isinstance(cfg, dict):
+        raise ValueError("display settings must be a JSON object")
+    out = {"dim": _num(cfg.get("dim", 1.0), 0.05, 1.0, "dim"), "night": None, "idle": None}
+    night = cfg.get("night")
+    if night:
+        if not isinstance(night, dict):
+            raise ValueError("night must be an object")
+        _clock(night.get("from"), "night.from")
+        _clock(night.get("to"), "night.to")
+        out["night"] = {"from": str(night["from"]).strip(), "to": str(night["to"]).strip(),
+                        "dim": _num(night.get("dim", 0.3), 0.05, 1.0, "night.dim")}
+    idle = cfg.get("idle")
+    if idle:
+        if not isinstance(idle, dict):
+            raise ValueError("idle must be an object")
+        out["idle"] = {"minutes": _num(idle.get("minutes", 5), 1, 240, "idle.minutes"),
+                       "dim": _num(idle.get("dim", 0.25), 0.05, 1.0, "idle.dim")}
+    return out
+
+
+def night_active(night, lt):
+    """Is the local time `lt` (a time.struct_time) inside the night window? Windows may cross midnight."""
+    if not night:
+        return False
+    now = lt.tm_hour * 60 + lt.tm_min
+    a, b = _clock(night["from"], "from"), _clock(night["to"], "to")
+    return (a <= now < b) if a <= b else (now >= a or now < b)
+
+
+def effective_dim(cfg, lt, idle_seconds):
+    """(brightness 0.05-1, idle_dimmed): the dimmest of the manual setting, the night window and idle dimming."""
+    dim, idle_on = cfg["dim"], False
+    if night_active(cfg["night"], lt):
+        dim = min(dim, cfg["night"]["dim"])
+    if cfg["idle"] and idle_seconds >= cfg["idle"]["minutes"] * 60:
+        dim, idle_on = min(dim, cfg["idle"]["dim"]), True
+    return dim, idle_on
+
+
+_dim_luts = {}
+
+
+def apply_dim(img, factor):
+    """Scale the brightness of an RGB image (a lookup table: about a millisecond)."""
+    if factor >= 0.99:
+        return img
+    key = round(factor, 2)
+    if key not in _dim_luts:
+        _dim_luts[key] = [int(i * key) for i in range(256)] * 3
+    return img.point(_dim_luts[key])
+
+
+def warning_text(low_power, temp):
+    """The banner text for the current problems (empty when there are none)."""
+    parts = []
+    if low_power:
+        parts.append("LOW POWER")
+    if temp is not None and temp >= THERMAL_SLOW_C:
+        parts.append("HOT %dC" % round(temp))
+    return "  ".join(parts)
+
+
+def draw_banner(img, text):
+    """A red label at the top centre, in front of everything: the same on every theme so it cannot be missed."""
+    d = ImageDraw.Draw(img)
+    font = _font(13, True)
+    w = int(d.textlength(text, font=font)) + 18
+    x0 = (img.width - w) // 2
+    d.rounded_rectangle((x0, 18, x0 + w, 36), 6, fill=(190, 30, 30), outline=(255, 255, 255), width=1)
+    d.text((img.width // 2, 27), text, font=font, fill=(255, 255, 255), anchor="mm")
+
+
+def draw_toast(img, text, theme):
+    """A small label at the bottom centre of the screen (the new theme's name, and so on)."""
+    d = ImageDraw.Draw(img)
+    bg, fg, acc = _hex(theme["bg"]), _hex(theme["fg"]), _hex(theme["accent"])
+    font = _font(16, True)
+    w = int(d.textlength(text, font=font)) + 28
+    x0, y0 = (img.width - w) // 2, 276
+    d.rounded_rectangle((x0, y0, x0 + w, y0 + 26), 10, fill=_mixc(bg, (0, 0, 0), 0.45), outline=acc, width=2)
+    d.text((img.width // 2, y0 + 13), text, font=font, fill=fg, anchor="mm")
+
+
 class ThemeManager(plugins.Plugin):
     __author__ = "theme_manager contributors"
-    __version__ = "2.1.0"
+    __version__ = "2.2.0"
     __license__ = "GPL3"
     __description__ = "Theme engine for the 3.5 inch display: colors, effects, animations, custom text, web GUI."
 
@@ -1106,6 +1345,20 @@ class ThemeManager(plugins.Plugin):
         self._menu_lock = threading.Lock()
         self._gps = None
         self._gps_wanted = 0
+        self._toast = None
+        self._try_until = 0
+        self._warn = ""
+        self._last_low = 0
+        self._temp = None
+        self._next_power = 0
+        self._last_swipe = 0
+        self._last_touch = 0
+        self._display_cfg = clean_display({})
+        self._display_mtime = 0
+        self._dim = 1.0
+        self._idle_dimmed = False
+        self._started = time.time()
+        self._swallow = False
         self._heat = 1.0
         self._next_temp = 0
         self._next_guard = 0
@@ -1165,6 +1418,8 @@ class ThemeManager(plugins.Plugin):
         if name not in themes:
             raise KeyError(name)
         theme = _clean(themes[name])
+        if persist:
+            self._try_until = 0
         with self._lock:
             self._active = name
             self._theme = theme
@@ -1180,6 +1435,36 @@ class ThemeManager(plugins.Plugin):
             except Exception as e:
                 logging.debug("[theme_manager] refresh failed: %s", e)
         logging.info("[theme_manager] theme -> %s", name)
+
+    def try_theme(self, theme, seconds):
+        """Show a theme (saved or not) for a while, then go back to the active one. Nothing is written to disk, so a
+        bad idea can never be left on the screen."""
+        clean = _clean(theme)
+        seconds = max(TRY_MIN_S, min(TRY_MAX_S, float(seconds)))
+        with self._lock:
+            self._theme = clean
+            self._trans = None
+            self._mood = None
+        self._apply_web(clean)
+        self._apply_faces(clean)
+        self._try_until = time.time() + seconds
+        self._wake.set()
+        if self._view:
+            try:
+                self._view.update(force=True)
+            except Exception as e:
+                logging.debug("[theme_manager] refresh failed: %s", e)
+        logging.info("[theme_manager] trying a theme for %d s (back to %s afterwards)", seconds, self._active)
+        return seconds
+
+    def _end_try(self):
+        self._try_until = 0
+        try:
+            self._apply(self._active)
+        except KeyError:                       # the saved theme was deleted meanwhile
+            self._apply("default")
+        self.toast("back to " + self._active)
+        self._refresh_now()
 
     def _apply_web(self, theme):
         try:
@@ -1205,6 +1490,12 @@ class ThemeManager(plugins.Plugin):
         if now - self._last_check < 1:
             return
         self._last_check = now
+        try:
+            m = os.path.getmtime(DISPLAY_FILE)
+        except OSError:
+            m = 0
+        if m != self._display_mtime:
+            self._load_display()
         try:
             m = os.path.getmtime(FORCE_FILE)
             if m != self._force_mtime:
@@ -1348,12 +1639,17 @@ class ThemeManager(plugins.Plugin):
             return None
         theme = theme or self._current(t)
         img = colorize(ctx["canvas"], theme, t, ctx["layers"], self._face_frame(theme, t))
+        if self._warn:
+            draw_banner(img, self._warn)
         menu = self._menu
         if menu is not None:
             if menu.get("tab") == "system" and menu["mode"] == "list":
                 self._fill_status(menu)
             draw_menu(img, menu, self._theme)
-        return rotate(img, self._rot)
+        toast = self._toast
+        if toast is not None:
+            draw_toast(img, toast[0], self._theme)
+        return rotate(apply_dim(img, self._dim), self._rot)
 
     def _present(self, img):
         """Write a frame to the framebuffer, sending only the rows that changed."""
@@ -1426,7 +1722,51 @@ class ThemeManager(plugins.Plugin):
             self._menu = None
         self._refresh_now()
 
+    # ---- brightness: manual dim, night window, idle dimming
+    def _load_display(self):
+        try:
+            with open(DISPLAY_FILE) as fp:
+                cfg = clean_display(json.load(fp))
+            self._display_mtime = os.path.getmtime(DISPLAY_FILE)
+        except FileNotFoundError:
+            cfg = clean_display({})
+            self._display_mtime = 0
+        except (ValueError, OSError) as e:
+            logging.warning("[theme_manager] display.json: %s", e)
+            return
+        self._display_cfg = cfg
+        self._update_dim(time.time())
+
+    def _update_dim(self, now):
+        idle = now - max(self._last_touch, self._started)
+        dim, idle_on = effective_dim(self._display_cfg, time.localtime(now), idle)
+        self._idle_dimmed = idle_on
+        if abs(dim - self._dim) > 0.005:
+            self._dim = dim
+            self._refresh_now()
+
+    def _cycle_dim(self):
+        """The System tab's dim button: 100% -> 60% -> 30% -> 100%."""
+        cur = self._display_cfg["dim"]
+        nxt = DIM_STEPS[(min(range(len(DIM_STEPS)), key=lambda i: abs(DIM_STEPS[i] - cur)) + 1) % len(DIM_STEPS)]
+        self._display_cfg = dict(self._display_cfg, dim=nxt)
+        try:
+            write_json(DISPLAY_FILE, self._display_cfg)
+            self._display_mtime = os.path.getmtime(DISPLAY_FILE)
+        except OSError as e:
+            logging.warning("[theme_manager] could not save display.json: %s", e)
+        self._update_dim(time.time())
+        self._refresh_now()
+
+    def toast(self, text, seconds=TOAST_S, now=None):
+        self._toast = (str(text)[:30], (time.time() if now is None else now) + seconds)
+
     def menu_tick(self, now):
+        if self._try_until and now >= self._try_until:
+            self._end_try()
+        if self._toast is not None and now > self._toast[1]:
+            self._toast = None
+            self._refresh_now()
         m = self._menu
         if m is not None and now > m["until"]:
             self.close_menu()
@@ -1504,6 +1844,9 @@ class ThemeManager(plugins.Plugin):
                 elif act == "refresh":
                     self.refresh_screen()
                     return
+                elif act == "dim":
+                    self._cycle_dim()
+                    return
                 elif act == "cal":
                     menu.update(mode="calib", step=0, raw=[])
                     menu["until"] = now + CALIB_TIMEOUT
@@ -1538,10 +1881,13 @@ class ThemeManager(plugins.Plugin):
     def _guard_tick(self, now):
         if now >= self._next_temp:
             self._next_temp = now + 5
+            self._update_dim(now)
             try:
                 temp = cpu_temp()
             except (OSError, ValueError):
                 temp = None
+            self._temp = temp
+            self._set_warning(now)
             if temp is not None:
                 new = heat_factor(temp, self._heat)
                 if new != self._heat:
@@ -1549,12 +1895,28 @@ class ThemeManager(plugins.Plugin):
                                     "paused" if new is None else "slowed down" if new > 1 else "back to normal")
                     self._heat = new
                     self._wake.set()
+        if now >= self._next_power:
+            self._next_power = now + 2
+            try:
+                if _power_state() == "LOW":
+                    self._last_low = now
+            except Exception:
+                pass
+            self._set_warning(now)
         if now >= self._next_guard:
             self._next_guard = now + GUARD_S
             try:
                 self._check_gps()
             except Exception as e:
                 logging.debug("[theme_manager] gps guard: %s", e)
+
+    def _set_warning(self, now):
+        """Show or hide the red banner for low power / high temperature (a theme can switch it off)."""
+        low = self._last_low > 0 and now - self._last_low < WARN_HOLD_S
+        text = warning_text(low, self._temp) if self._theme.get("warnings", True) else ""
+        if text != self._warn:
+            self._warn = text
+            self._refresh_now()
 
     def _gps_options(self):
         try:
@@ -1609,6 +1971,7 @@ class ThemeManager(plugins.Plugin):
             return "AUTO"
 
     def _fill_status(self, menu):
+        menu["dim"] = self._display_cfg["dim"]
         menu["lines"] = [_expand(t) for t in STATUS_LINES]
         menu["mode_now"] = self._agent_mode()
 
@@ -1701,6 +2064,25 @@ class ThemeManager(plugins.Plugin):
             menu["until"] = time.time() + MENU_TIMEOUT
             self._refresh_now()
 
+    def on_swipe(self, first, last, now):
+        """A clearly sideways swipe on the bare screen changes theme: left = next, right = previous."""
+        if self._menu is not None or self._touch_m is None or now - self._last_swipe < 0.8:
+            return
+        x0, y0 = to_screen(self._touch_m, *first)
+        x1, y1 = to_screen(self._touch_m, *last)
+        dx, dy = x1 - x0, y1 - y0
+        if abs(dx) < SWIPE_PX or abs(dy) * 2 > abs(dx):
+            return
+        names = list(self._all())
+        idx = names.index(self._active) if self._active in names else 0
+        name = names[(idx + (-1 if dx > 0 else 1)) % len(names)]
+        self._last_swipe = now
+        self.toast(name, now=now)
+        try:
+            self._apply(name, persist=True)
+        except KeyError:
+            pass
+
     def feed(self, etype, code, value, now):
         """One input event from the touch controller."""
         if etype == EV_ABS and code in (ABS_X, ABS_Y):
@@ -1708,10 +2090,25 @@ class ThemeManager(plugins.Plugin):
         elif etype == EV_KEY and code == BTN_TOUCH:
             if value:
                 self._down = (now, [])
+                self._swallow = self._idle_dimmed
+                self._last_touch = now
+                if self._idle_dimmed:
+                    self._update_dim(now)          # wake up at once
             elif self._down:
                 t0, samples = self._down
                 self._down = None
-                if samples and now - t0 <= TAP_MAX_S:
+                if not samples:
+                    return
+                if self._swallow:                  # the touch that woke the screen is only a wake-up
+                    self._swallow = False
+                    return
+                head, tail = samples[:3], samples[-3:]
+                first = tuple(sorted(p[i] for p in head)[len(head) // 2] for i in (0, 1))
+                last = tuple(sorted(p[i] for p in tail)[len(tail) // 2] for i in (0, 1))
+                if abs(last[0] - first[0]) + abs(last[1] - first[1]) >= SWIPE_RAW:
+                    if now - t0 <= SWIPE_MAX_S:
+                        self.on_swipe(first, last, now)
+                elif now - t0 <= TAP_MAX_S:
                     xs, ys = sorted(p[0] for p in samples), sorted(p[1] for p in samples)
                     self.on_tap(xs[len(xs) // 2], ys[len(ys) // 2], now)
         elif etype == EV_SYN and self._down and None not in self._abs:
@@ -1861,6 +2258,7 @@ class ThemeManager(plugins.Plugin):
         self._apply_faces(self._theme)
         self._running = True
         threading.Thread(target=self._anim_loop, daemon=True, name="theme-anim").start()
+        self._load_display()
         global STAT_SOURCE
         STAT_SOURCE = self._live_stat
         threading.Thread(target=self._gps_loop, daemon=True, name="theme-gps").start()
@@ -1940,6 +2338,10 @@ class ThemeManager(plugins.Plugin):
         if path == "api/themes":
             return jsonify({"active": self._active, "themes": self._all()})
 
+        if path == "api/backup":
+            return Response(make_backup(), mimetype="application/zip",
+                            headers={"Content-Disposition": "attachment; filename=theme-manager-backup.zip"})
+
         if path == "api/packs":
             return jsonify(list_packs())
 
@@ -1996,6 +2398,30 @@ class ThemeManager(plugins.Plugin):
         if request.method == "POST":
             data = _body(request)
             try:
+                if path == "api/restore":
+                    upload = request.files.get("backup")
+                    if upload is None:
+                        return jsonify({"ok": False, "error": "choose a backup file"}), 400
+                    report = restore_backup(upload.read(BACKUP_MAX_BYTES + 1), request.form.get("overwrite") == "1")
+                    return jsonify(dict(report, ok=True))
+                if path == "api/faces":
+                    pack = str(request.form.get("pack", "")).strip()
+                    uploads = request.files.getlist("files")[:40]
+                    if not uploads:
+                        return jsonify({"ok": False, "error": "choose some images"}), 400
+                    report = {"added": [], "skipped": [], "invalid": []}
+                    for f in uploads:
+                        try:
+                            result = store_face(pack, f.filename or "", f.read(FACE_MAX_BYTES + 1), True)
+                            report["added"].append("%s (%s)" % (f.filename, result))
+                        except ValueError as e:
+                            report["invalid"].append(str(e))
+                    return jsonify(dict(report, ok=bool(report["added"])))
+                if path == "api/faces/delete":
+                    return jsonify({"ok": delete_pack(data.get("pack", ""))})
+                if path == "api/try":
+                    seconds = self.try_theme(data.get("theme", {}), data.get("seconds", 30))
+                    return jsonify({"ok": True, "seconds": seconds})
                 if path == "api/menu":
                     if data.get("open", True):
                         self.open_menu(data.get("mode") if data.get("mode") in ("list", "calib") else None, data.get("tab", "themes"))
@@ -2096,14 +2522,18 @@ h2{font-size:12px;color:var(--dim);text-transform:uppercase;letter-spacing:1px;m
 <div id="grid" class="grid"></div>
 <div class="bar">
 <input type="text" id="name" maxlength="32" placeholder="theme name">
-<button id="apply">Apply to screen</button><button id="save">Save</button>
+<button id="apply">Apply to screen</button><button id="try" title="show it on the screen for 30 seconds, then go back">Try 30 s</button><button id="save">Save</button>
 <button id="export">Export</button><button id="import">Import</button><button id="del" class="d">Delete</button>
 <input type="file" id="file" accept=".json,application/json" hidden></div>
+<div class="bar" id="backup"><span style="color:var(--dim)">Backup</span>
+<a id="dl" download="theme-manager-backup.zip"><button type="button">Download all my themes and faces</button></a>
+<button id="restore" type="button">Restore from a backup</button><label class="ck"><input type="checkbox" id="over"> replace what is already there</label>
+<input type="file" id="bfile" accept=".zip,application/zip" hidden></div>
 <div id="tabs" class="tabs"></div>
 <div id="panel" class="ed"></div>
 </div>
 {% raw %}<script>
-const CSRF=document.querySelector('meta[name="csrf_token"]').content;
+let CSRF=document.querySelector('meta[name="csrf_token"]').content;
 const base=location.pathname.replace(/\/$/,'');
 const $=id=>document.getElementById(id);
 const E=(tag,props,...kids)=>{const e=document.createElement(tag);
@@ -2122,7 +2552,12 @@ const HOLDERS=['{name}','{time}','{date}','{cpu}','{temp}','{mem}','{uptime}','{
 const TABS=['Colors','Effects','Text','Elements','Moods','Faces','JSON'];
 let S={active:'',themes:{}},sel='',cur={},info={elements:[],entities:[],packs:{}},tab='Colors',mood='sad',pvMood=null,busy=false,dirty=false,pvErr=false,timer=null;
 const say=t=>$('msg').textContent=t||'';
-const post=(p,b)=>fetch(base+'/api/'+p,{method:'POST',headers:{'Content-Type':'application/json','X-CSRFToken':CSRF},body:JSON.stringify(b)});
+/* After the plugin restarts (or the browser loses its session) the page's token is stale: fetch a fresh one and retry once. */
+async function newToken(){try{const h=await(await fetch(location.pathname,{cache:'no-store'})).text();const m=h.match(/name="csrf_token" content="([^"]+)"/);if(m){CSRF=m[1];return true}}catch(e){}return false}
+async function send(p,opts,retry){const r=await fetch(base+'/api/'+p,Object.assign({method:'POST'},opts,{headers:Object.assign({'X-CSRFToken':CSRF},opts.headers||{})}));
+ if(r.status===400&&retry){const t=await r.clone().text();if(/CSRF/i.test(t)&&await newToken())return send(p,opts,false)}return r}
+const post=(p,b)=>send(p,{headers:{'Content-Type':'application/json'},body:JSON.stringify(b)},true);
+const postForm=(p,fd)=>send(p,{body:fd},true);
 const clone=o=>JSON.parse(JSON.stringify(o));
 const clamp=(v,a,b)=>Math.max(a,Math.min(b,v));
 
@@ -2251,10 +2686,29 @@ function panelFaces(){const p=E('div');const packs=info.packs;
    field('offset y',numIn((cur.face_offset||[0,0])[1],v=>{cur.face_offset=[(cur.face_offset||[0,0])[0],v];touch()},-300,300)),
    check('tint with face color (for white outline faces)',cur.face_tint,on=>{cur.face_tint=on;touch()})));
   p.append(E('h2',{},'Faces in this pack'),E('div',{class:'thumbs'},(packs[cur.face_pack]||[]).map(m=>E('figure',{},E('img',{src:base+'/api/face/'+cur.face_pack+'/'+m,alt:m}),m))))}
+ const pname=E('input',{type:'text',id:'packname',maxlength:32,value:cur.face_pack||'',placeholder:'pack name'});
+ const files=E('input',{type:'file',id:'facefiles',multiple:'multiple',accept:'image/png,image/gif,image/jpeg,image/webp'});
+ p.append(E('h2',{},'Add or replace faces'),E('p',{style:'color:var(--dim);margin:0 0 8px'},'Choose images named after moods (happy.png, sad.png, angry.gif, default.png ...). They are resized to fit the screen; a gif keeps its animation.'),
+  E('div',{class:'row'},field('pack name',pname),field('images',files),E('button',{id:'faceupload',onclick:async()=>{
+    const pack=pname.value.trim();if(!pack||!files.files.length)return say('give the pack a name and choose some images');
+    const fd=new FormData();fd.append('pack',pack);for(const f of files.files)fd.append('files',f);
+    const j=await(await postForm('faces',fd)).json();
+    say((j.added||[]).length+' saved'+((j.invalid||[]).length?', '+j.invalid.length+' not used: '+j.invalid[0]:'')+(j.error?j.error:''));
+    await refresh(true);if((j.added||[]).length){cur.face_pack=pack;touch()}panel()}},'Upload'),
+   cur.face_pack?E('button',{class:'d',id:'facedelete',onclick:async()=>{if(!confirm('Delete the face pack "'+cur.face_pack+'" and all its images?'))return;
+    const j=await(await post('faces/delete',{pack:cur.face_pack})).json();say(j.ok?'deleted the pack':'could not delete it');cur.face_pack=undefined;touch();await refresh(true);panel()}},'Delete this pack'):null));
  return p}
 function panelJson(){prune(cur);const ta=E('textarea',{id:'json',spellcheck:'false',value:JSON.stringify(cur,null,2)});
  ta.oninput=()=>{try{const o=normalize(JSON.parse(ta.value));ta.classList.remove('bad');cur=o;schedule()}catch(e){ta.classList.add('bad')}};
- return E('div',{},E('p',{style:'color:var(--dim);margin:0 0 8px'},'Full theme JSON. Changes apply to the preview as you type.'),ta)}
+ const url=E('input',{type:'text',id:'url',placeholder:'https://github.com/.../theme.json',style:'flex:1;min-width:220px'});
+ return E('div',{},E('p',{style:'color:var(--dim);margin:0 0 8px'},'Full theme JSON. Changes apply to the preview as you type.'),ta,
+  E('div',{class:'row'},url,E('button',{id:'importurl',onclick:()=>importUrl(url.value)},'Import from a link')))}
+async function importUrl(u){u=u.trim();
+ if(!/^https:\/\//i.test(u))return say('use a https:// link');
+ const g=u.match(/^https:\/\/github\.com\/([^/]+)\/([^/]+)\/blob\/(.+)$/i);if(g)u='https://raw.githubusercontent.com/'+g[1]+'/'+g[2]+'/'+g[3];
+ try{const r=await fetch(u);if(!r.ok)return say('could not download it (HTTP '+r.status+')');
+  cur=normalize(JSON.parse(await r.text()));$('name').value=(u.split('/').pop()||'theme').replace(/\.json.*$/i,'').replace(/[^A-Za-z0-9_\- ]/g,'_').slice(0,32);
+  panel();overlay();schedule();say('imported from the link: check the preview, then Save')}catch(e){say('could not read a theme from that link')}}
 const PANELS={Colors:panelColors,Effects:panelEffects,Text:panelText,Elements:panelElements,Moods:panelMoods,Faces:panelFaces,JSON:panelJson};
 function panel(){const p=$('panel');p.innerHTML='';p.append(PANELS[tab]());
  const t=$('tabs');t.innerHTML='';for(const n of TABS)t.append(E('button',{class:n===tab?'on':'',onclick:async()=>{tab=n;pickKey=null;$('pick').innerHTML='';$('pick').className='';pvMood=n==='Moods'?mood:null;if(n==='Elements'||n==='Moods'){try{info.entities=await(await fetch(base+'/api/entities')).json()}catch(e){}}panel();overlay();schedule()}},n))}
@@ -2297,7 +2751,14 @@ $('save').onclick=async()=>{const n=$('name').value.trim();
  if(!nameOk(n))return say('name: letters, digits, space, _ and - (max 32)');
  if(S.themes[n]&&S.themes[n].builtin)return say('"'+n+'" is built in. Type a new name to save your changes.');
  if(await saveAs(n)){say('saved '+n);sel=n;await refresh()}};
-$('apply').onclick=async()=>{const n=$('name').value.trim();const ex=S.themes[n];
+let tryTimer=null;
+$('try').onclick=async()=>{const r=await post('try',{theme:prune(clone(cur)),seconds:30});const j=await r.json();
+ if(!j.ok)return say(j.error||'this theme cannot be shown');
+ let left=Math.round(j.seconds);clearInterval(tryTimer);
+ say('showing this theme on the screen for '+left+' s, then back to the saved one (Apply keeps it)');
+ const tick=()=>{if(left<=0){clearInterval(tryTimer);$('try').textContent='Try 30 s';return}$('try').textContent='back in '+left+' s';left--};
+ tick();tryTimer=setInterval(tick,1000)};
+$('apply').onclick=async()=>{clearInterval(tryTimer);$('try').textContent='Try 30 s';const n=$('name').value.trim();const ex=S.themes[n];
  if(ex&&ex.builtin){if(!same(cur,ex))return say('built-in themes can\'t be changed: type a new name, Save, then Apply');}
  else{if(!nameOk(n))return say('give the theme a name first');if(!(ex&&same(cur,ex))&&!await saveAs(n))return}
  const r=await(await post('apply',{name:n})).json();say(r.ok?'applied '+n+' to the screen':r.error);sel=n;await refresh()};
@@ -2307,6 +2768,13 @@ $('import').onclick=()=>$('file').click();
 $('file').onchange=async e=>{const f=e.target.files[0];if(!f)return;
  try{cur=normalize(JSON.parse(await f.text()));$('name').value=f.name.replace(/\.json$/i,'').replace(/[^A-Za-z0-9_\- ]/g,'_').slice(0,32);
   panel();overlay();schedule();say('imported: check the preview, then Save')}catch(err){say('not a valid theme file')}e.target.value=''};
+$('dl').href=base+'/api/backup';
+$('restore').onclick=()=>$('bfile').click();
+$('bfile').onchange=async e=>{const f=e.target.files[0];if(!f)return;const fd=new FormData();fd.append('backup',f);fd.append('overwrite',$('over').checked?'1':'0');
+ try{const r=await postForm('restore',fd);const j=await r.json();
+  if(!j.ok)say(j.error||'could not restore that file');
+  else{say('restored '+j.added.length+', skipped '+j.skipped.length+(j.invalid.length?', could not use '+j.invalid.length+' ('+j.invalid[0]+')':''));await refresh()}}
+ catch(err){say('could not restore that file')}e.target.value=''};
 window.addEventListener('resize',overlay);
 refresh();
 </script>{% endraw %}</body></html>
@@ -2342,6 +2810,27 @@ if __name__ == "__main__":
         write_json(FORCE_FILE, {"mood": None if a[1] == "off" else a[1],
                                 "until": time.time() + (float(a[2]) if len(a) == 3 else 15)})
         print("mood ->", a[1])
+    elif cmd in ("dim", "night", "idle") and len(a) >= 2:
+        try:
+            cfg = clean_display(json.load(open(DISPLAY_FILE))) if os.path.exists(DISPLAY_FILE) else clean_display({})
+            if cmd == "dim" and len(a) == 2:
+                cfg["dim"] = float(a[1]) / 100
+            elif cmd == "night" and a[1] == "off":
+                cfg["night"] = None
+            elif cmd == "night" and len(a) == 4:
+                cfg["night"] = {"from": a[1], "to": a[2], "dim": float(a[3]) / 100}
+            elif cmd == "idle" and a[1] == "off":
+                cfg["idle"] = None
+            elif cmd == "idle" and len(a) == 3:
+                cfg["idle"] = {"minutes": float(a[1]), "dim": float(a[2]) / 100}
+            else:
+                raise ValueError("wrong arguments, see: theme_manager.py --help")
+            cfg = clean_display(cfg)
+        except ValueError as e:
+            sys.exit("cannot set %s: %s" % (cmd, e))
+        os.makedirs(THEME_DIR, exist_ok=True)
+        write_json(DISPLAY_FILE, cfg)
+        print(json.dumps(cfg))
     elif cmd == "validate" and len(a) == 2:
         try:
             t = _clean(json.load(open(a[1])))

@@ -42,6 +42,7 @@ def sandbox():
     T.ACTIVE_FILE = os.path.join(d, "active.json")
     T.FORCE_FILE = os.path.join(d, "force_mood.json")
     T.TOUCH_FILE = os.path.join(d, "touch.json")
+    T.DISPLAY_FILE = os.path.join(d, "display.json")
     T.FACES_DIR = os.path.join(d, "faces")
     T.DOCS_FILE = os.path.join(d, "README.md")
     os.makedirs(T.FACES_DIR)
@@ -132,6 +133,18 @@ def panel(sx, sy):
     return int(4095 - (sy / 320) * 4095 + random.randint(-15, 15)), int((sx / 480) * 4095 + random.randint(-15, 15))
 
 
+def swipe_burst(tm, sx0, sy0, sx1, sy1, t, dur=0.35, steps=8):
+    """A finger moving from one screen pixel to another on the calibrated fake panel."""
+    tm.feed(T.EV_KEY, T.BTN_TOUCH, 1, t)
+    for i in range(steps + 1):
+        f = i / steps
+        rx, ry = panel(sx0 + (sx1 - sx0) * f, sy0 + (sy1 - sy0) * f)
+        tm.feed(T.EV_ABS, T.ABS_X, rx, t + dur * f)
+        tm.feed(T.EV_ABS, T.ABS_Y, ry, t + dur * f)
+        tm.feed(T.EV_SYN, 0, 0, t + dur * f)
+    tm.feed(T.EV_KEY, T.BTN_TOUCH, 0, t + dur)
+
+
 class Panel:
     """Drives a manager the way a finger would: taps at screen pixels through a calibrated fake panel."""
     def __init__(self, tm):
@@ -140,6 +153,10 @@ class Panel:
     def tap(self, sx, sy):
         self.t += 1.5
         press_burst(self.tm, *panel(sx, sy), self.t)
+
+    def swipe(self, sx0, sy0, sx1, sy1, dur=0.35):
+        self.t += 1.5
+        swipe_burst(self.tm, sx0, sy0, sx1, sy1, self.t, dur)
 
     def tap_rect(self, rect):
         self.tap((rect[0] + rect[2]) // 2, (rect[1] + rect[3]) // 2)
