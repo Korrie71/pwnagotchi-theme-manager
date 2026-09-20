@@ -24,6 +24,31 @@ from PIL import Image, ImageChops, ImageDraw, ImageFilter, ImageFont
 
 import pwnagotchi.plugins as plugins
 
+def _tame_malloc():
+    """Image buffers are large and short-lived. Keep them out of glibc's per-thread heaps (which never give memory back
+    to the OS) so the web server's many request threads don't slowly bloat pwnagotchi's memory."""
+    try:
+        import ctypes
+        libc = ctypes.CDLL("libc.so.6")
+        libc.mallopt(-3, 131072)   # M_MMAP_THRESHOLD: fixed, so big buffers are mmap'ed and freed straight back
+        libc.mallopt(-8, 2)        # M_ARENA_MAX: fewer per-thread heaps
+        return libc
+    except Exception:
+        return None
+
+
+_libc = _tame_malloc()
+
+
+def trim_memory():
+    """Hand freed heap pages back to the OS."""
+    if _libc is not None:
+        try:
+            _libc.malloc_trim(0)
+        except Exception:
+            pass
+
+
 THEME_DIR = "/etc/pwnagotchi/themes"
 ACTIVE_FILE = os.path.join(THEME_DIR, "active.json")
 DOCS_FILE = os.path.join(THEME_DIR, "README.md")
@@ -131,6 +156,14 @@ BUILTIN = {
 
 
 # ---------------------------------------------------------------- validation
+def write_json(path, obj, **kw):
+    """Write atomically, so the plugin never reads a half-written file."""
+    tmp = "%s.%d.tmp" % (path, os.getpid())
+    with open(tmp, "w") as fp:
+        json.dump(obj, fp, **kw)
+    os.replace(tmp, path)
+
+
 def _hex(c):
     return tuple(int(c[i:i + 2], 16) for i in (1, 3, 5))
 
@@ -756,6 +789,7 @@ class ThemeManager(plugins.Plugin):
         self._running = False
         self._ctx = None
         self._wake = threading.Event()
+        self._last_trim = 0
         self._face_multi = False
         self._mood = None
         self._mood_base = None
@@ -796,8 +830,7 @@ class ThemeManager(plugins.Plugin):
 
     def _save_active(self, name):
         os.makedirs(THEME_DIR, exist_ok=True)
-        with open(ACTIVE_FILE, "w") as fp:
-            json.dump({"active": name}, fp)
+        write_json(ACTIVE_FILE, {"active": name})
         self._mtime = os.path.getmtime(ACTIVE_FILE)
 
     # ---- applying
@@ -849,8 +882,9 @@ class ThemeManager(plugins.Plugin):
         try:
             m = os.path.getmtime(FORCE_FILE)
             if m != self._force_mtime:
+                with open(FORCE_FILE) as fp:
+                    f = json.load(fp)
                 self._force_mtime = m
-                f = json.load(open(FORCE_FILE))
                 mood = f.get("mood")
                 self._force = (mood if mood in MOODS else None, float(f.get("until", 0)))
                 self._wake.set()
@@ -859,13 +893,13 @@ class ThemeManager(plugins.Plugin):
         try:
             m = os.path.getmtime(ACTIVE_FILE)
             if m != self._mtime:
-                self._mtime = m
                 with open(ACTIVE_FILE) as fp:
                     name = json.load(fp).get("active")
+                self._mtime = m
                 if name and name != self._active:
                     self._apply(name)
-        except FileNotFoundError:
-            pass
+        except (FileNotFoundError, ValueError):
+            pass  # missing, or caught mid-write: try again on the next tick
         except Exception as e:
             logging.warning("[theme_manager] poll: %s", e)
 
@@ -1016,6 +1050,9 @@ class ThemeManager(plugins.Plugin):
         while self._running:
             start = time.time()
             self._poll_files()
+            if start - self._last_trim > 20:
+                self._last_trim = start
+                trim_memory()
             theme = self._current(start)
             busy = self._trans is not None or start < self._event_until + 0.3 or start < self._force[1] + 0.3
             if self._ctx is None or not (busy or self._face_multi or is_animated(theme)):
@@ -1199,6 +1236,16 @@ class ThemeManager(plugins.Plugin):
                 pass
             return jsonify(sorted(names))
 
+        if path == "api/entities":
+            ctx = self._ctx or {"layers": {}}
+            out = {k: {"key": k, "box": list(region[1])} for k, region in ctx["layers"].items()}
+            try:
+                for k, _ in self._view._state.items():
+                    out.setdefault(k, {"key": k, "box": None})
+            except Exception:
+                pass
+            return jsonify(sorted(out.values(), key=lambda e: e["key"]))
+
         if path.startswith("api/face/"):
             parts = path.split("/")
             if len(parts) == 4 and PACK_RE.fullmatch(parts[2]) and (parts[3] in MOODS or parts[3] == "default"):
@@ -1251,8 +1298,7 @@ class ThemeManager(plugins.Plugin):
                         return jsonify({"ok": False, "error": "invalid or reserved name"}), 400
                     theme = _clean(data.get("theme", {}))
                     os.makedirs(THEME_DIR, exist_ok=True)
-                    with open(os.path.join(THEME_DIR, name + ".json"), "w") as fp:
-                        json.dump(theme, fp, indent=2)
+                    write_json(os.path.join(THEME_DIR, name + ".json"), theme, indent=2)
                     if name == self._active:
                         self._apply(name)
                     return jsonify({"ok": True})
@@ -1309,11 +1355,22 @@ button.d{border-color:#e53935}.fxbox{display:flex;flex-direction:column;gap:6px;
 .gbar{height:22px;border-radius:4px;border:1px solid var(--line);margin:6px 0}
 .thumbs{display:flex;flex-wrap:wrap;gap:6px}.thumbs figure{margin:0;text-align:center;font-size:10px;color:var(--dim)}
 .thumbs img{width:96px;height:36px;background:#222;border-radius:4px;object-fit:contain}
+#ov[data-mode=ent]{pointer-events:none}
+.eb{position:absolute;border:1px dotted rgba(255,255,255,.55);pointer-events:auto;cursor:pointer}
+.eb:hover,.eb.sel{background:rgba(76,175,80,.3);border:1px solid var(--acc)}
+.pickbar{margin:6px 0;padding:6px 8px;border:1px solid var(--acc);border-radius:8px;background:var(--panel);max-width:480px}
+.ent{display:flex;flex-direction:column;gap:3px;margin:6px 0}
+.erow{display:flex;align-items:center;gap:10px;padding:3px 6px;border:1px solid transparent;border-radius:6px;flex-wrap:wrap}
+.erow.set{border-color:var(--line)}.erow.sel{border-color:var(--acc);background:rgba(76,175,80,.12)}
+.ename{width:120px;font:12px ui-monospace,monospace;overflow:hidden;text-overflow:ellipsis}
+.erow:not(.set) .x{visibility:hidden}.erow button.x{padding:2px 8px;font-size:12px;border-color:var(--line);color:var(--dim)}
+.erow .inh{font-size:11px;color:var(--dim)}
 h2{font-size:12px;color:var(--dim);text-transform:uppercase;letter-spacing:1px;margin:14px 0 6px}
 </style></head><body><div class="wrap">
 <h1>Theme Manager <a href="docs" target="_blank">guide &rarr;</a></h1>
 <div class="pv"><img id="prev" alt="preview"><div id="ov"></div></div>
 <div id="msg"></div>
+<div id="pick"></div>
 <div id="grid" class="grid"></div>
 <div class="bar">
 <input type="text" id="name" maxlength="32" placeholder="theme name">
@@ -1341,7 +1398,7 @@ const ANIM=['pulse','rainbow','glitch','rain','stars','noise'];
 const MOODS=['look_r','sleep','awake','bored','intense','cool','happy','grateful','excited','motivated','demotivated','smart','lonely','sad','angry','friend','broken','debug','upload','handshake'];
 const HOLDERS=['{name}','{time}','{date}','{cpu}','{temp}','{mem}','{uptime}'];
 const TABS=['Colors','Effects','Text','Elements','Moods','Faces','JSON'];
-let S={active:'',themes:{}},sel='',cur={},info={elements:[],packs:{}},tab='Colors',mood='sad',pvMood=null,busy=false,dirty=false,pvErr=false,timer=null;
+let S={active:'',themes:{}},sel='',cur={},info={elements:[],entities:[],packs:{}},tab='Colors',mood='sad',pvMood=null,busy=false,dirty=false,pvErr=false,timer=null;
 const say=t=>$('msg').textContent=t||'';
 const post=(p,b)=>fetch(base+'/api/'+p,{method:'POST',headers:{'Content-Type':'application/json','X-CSRFToken':CSRF},body:JSON.stringify(b)});
 const clone=o=>JSON.parse(JSON.stringify(o));
@@ -1393,16 +1450,31 @@ function effectsEditor(getList){const box=E('div',{class:'fxbox'});
     E('div',{class:'row'},field(k+' (optional)',colorIn(have[k]||'#ffffff',v=>{have[k]=v;touch()}))));
    box.append(sub)}}
  return box}
-function elementsEditor(getObj){const box=E('div',{class:'fxbox'});const o0=getObj(false)||{};
- const keys=[...new Set([...info.elements,...Object.keys(o0)])];
- for(const k of keys){const v=(getObj(false)||{})[k];
-  const row=E('div',{class:'row'},check(k,v!==undefined,on=>{const o=getObj(true);if(on)o[k]=cur.fg||'#ffffff';else delete o[k];touch();panel()}));
-  if(v!==undefined){if(v!=='rainbow')row.append(colorIn(v,c=>{getObj(true)[k]=c;touch()}));
-   row.append(check('rainbow',v==='rainbow',on=>{getObj(true)[k]=on?'rainbow':(cur.fg||'#ffffff');touch();panel()}))}
-  box.append(row)}
- const inp=E('input',{type:'text',placeholder:'plugin element name',maxlength:40});
- box.append(E('div',{class:'row'},inp,E('button',{onclick:()=>{const k=inp.value.trim();if(/^[A-Za-z0-9_.\-]{1,40}$/.test(k)){getObj(true)[k]=cur.fg||'#ffffff';touch();panel()}}},'add')));
+/* One row per on-screen entity: the color square assigns a color immediately, "reset" goes back to the theme color. */
+const inheritColor=(k,bx,src)=>{const t=Object.assign({},cur,src||{});return bx&&(bx[1]<=14||bx[3]>=300)?(t.accent||'#ffffff'):(t.fg||'#ffffff')};
+let entCtx=null,pickKey=null;
+const entBox=k=>{const e=info.entities.find(e=>e.key===k);return e?e.box:null};
+function entityRow(k,getObj,src){const v=(getObj(false)||{})[k];const eff=v&&v!=='rainbow'?v:inheritColor(k,entBox(k),src);
+ const again=()=>{panel();if(pickKey)showPick(pickKey)};
+ const row=E('div',{class:'erow'+(v!==undefined?' set':''),'data-key':k},E('span',{class:'ename',title:k},k),
+  colorIn(eff,c=>{getObj(true)[k]=c;row.classList.add('set');touch()}),
+  check('rainbow',v==='rainbow',on=>{getObj(true)[k]=on?'rainbow':eff;touch();again()}),
+  E('button',{class:'x',title:'back to the theme color',onclick:()=>{delete getObj(true)[k];touch();again()}},'reset'),
+  v===undefined?E('span',{class:'inh'},'theme color'):null);
+ return row}
+function entityEditor(getObj,src){entCtx={getObj,src};const box=E('div',{class:'ent'});
+ const keys=new Set(info.entities.map(e=>e.key));for(const k of Object.keys(getObj(false)||{}))keys.add(k);
+ for(const k of [...keys].sort((a,b)=>a.localeCompare(b)))box.append(entityRow(k,getObj,src));
+ const inp=E('input',{type:'text',placeholder:'other element name',maxlength:40});
+ box.append(E('div',{class:'row'},inp,E('button',{onclick:()=>{const k=inp.value.trim();if(/^[A-Za-z0-9_.\-]{1,40}$/.test(k)){getObj(true)[k]=cur.fg||'#ffffff';touch();panel()}}},'add'),
+  E('button',{class:'d',onclick:()=>{const o=getObj(false);if(o){for(const k of Object.keys(o))delete o[k];touch();panel();if(pickKey)showPick(pickKey)}}},'reset all')));
  return box}
+/* clicking a part of the preview shows its controls right under the preview (no scrolling away from it) */
+function showPick(k){const bar=$('pick');bar.innerHTML='';pickKey=k;
+ if(!k||!entCtx||(tab!=='Elements'&&tab!=='Moods')){bar.className='';pickKey=null;return}
+ bar.className='pickbar';bar.append(entityRow(k,entCtx.getObj,entCtx.src),E('button',{class:'x',style:'margin-left:8px;padding:2px 8px',onclick:()=>{selectEntity(null)}},'close'))}
+function selectEntity(k){document.querySelectorAll('#panel .erow').forEach(r=>r.classList.toggle('sel',r.dataset.key===k));
+ document.querySelectorAll('#ov .eb').forEach(d=>d.classList.toggle('sel',d.dataset.key===k));showPick(k)}
 
 /* ---- panels ---- */
 function panelColors(){const p=E('div');
@@ -1432,8 +1504,8 @@ function panelText(){const p=E('div');const L=()=>cur.text=cur.text||[];
   if(l.scroll)t.append(E('div',{class:'row'},slider('speed px/s',[1,300,1],l.speed||40,v=>{l.speed=v;touch()}),slider('box width',[10,480,5],l.width||300,v=>{l.width=v;touch();overlay()})));
   p.append(t)});
  p.append(E('button',{onclick:()=>{L().push({text:'{name} {time}',x:10,y:270,size:12});touch();panel();overlay()}},'+ add text line'));return p}
-const panelElements=()=>E('div',{},E('p',{style:'color:var(--dim);margin:0 0 8px'},'Give individual parts of the screen their own color. Names come from the live UI.'),
- elementsEditor(c=>c?(cur.elements=cur.elements||{}):cur.elements));
+const panelElements=()=>E('div',{},E('p',{style:'color:var(--dim);margin:0 0 8px'},'Give each part of the screen its own color: click a part on the preview, or use the color squares. \u201Ctheme color\u201D means it follows the theme.'),
+ entityEditor(c=>c?(cur.elements=cur.elements||{}):cur.elements));
 function moodObj(create){if(!cur.mood){if(!create)return undefined;cur.mood={}}
  if(!cur.mood[mood]){if(!create)return undefined;cur.mood[mood]={}}return cur.mood[mood]}
 function panelMoods(){const p=E('div');
@@ -1445,7 +1517,7 @@ function panelMoods(){const p=E('div');
  const m=moodObj(false)||{};
  p.append(E('h2',{},'Colors'),E('div',{class:'row'},['fg','accent','bg'].map(k=>E('div',{class:'row'},
   check(k,m[k]!==undefined,on=>{const o=moodObj(true);if(on)o[k]=cur[k];else delete o[k];touch();panel()}),m[k]!==undefined?colorIn(m[k],v=>{moodObj(true)[k]=v;touch()}):null))));
- p.append(E('h2',{},'Element colors'),elementsEditor(c=>{const o=moodObj(c);return o?(c?(o.elements=o.elements||{}):o.elements):undefined}));
+ p.append(E('h2',{},'Element colors'),entityEditor(c=>{const o=moodObj(c);return o?(c?(o.elements=o.elements||{}):o.elements):undefined},moodObj(false)));
  p.append(E('h2',{},'Extra effects'),effectsEditor(()=>{const o=moodObj(true);return o.effects=o.effects||[]}));return p}
 function panelFaces(){const p=E('div');const packs=info.packs;
  p.append(E('p',{style:'color:var(--dim);margin:0 0 8px'},'Face packs are folders of PNG/GIF images named after moods, in /etc/pwnagotchi/themes/faces/.'));
@@ -1461,18 +1533,23 @@ function panelJson(){prune(cur);const ta=E('textarea',{id:'json',spellcheck:'fal
  return E('div',{},E('p',{style:'color:var(--dim);margin:0 0 8px'},'Full theme JSON. Changes apply to the preview as you type.'),ta)}
 const PANELS={Colors:panelColors,Effects:panelEffects,Text:panelText,Elements:panelElements,Moods:panelMoods,Faces:panelFaces,JSON:panelJson};
 function panel(){const p=$('panel');p.innerHTML='';p.append(PANELS[tab]());
- const t=$('tabs');t.innerHTML='';for(const n of TABS)t.append(E('button',{class:n===tab?'on':'',onclick:()=>{tab=n;pvMood=n==='Moods'?mood:null;panel();overlay();schedule()}},n))}
+ const t=$('tabs');t.innerHTML='';for(const n of TABS)t.append(E('button',{class:n===tab?'on':'',onclick:async()=>{tab=n;pickKey=null;$('pick').innerHTML='';$('pick').className='';pvMood=n==='Moods'?mood:null;if(n==='Elements'||n==='Moods'){try{info.entities=await(await fetch(base+'/api/entities')).json()}catch(e){}}panel();overlay();schedule()}},n))}
 
 /* ---- drag text lines on the preview ---- */
 const est=t=>(t||'').replace(/\{time\}/g,'00:00:00').replace(/\{date\}/g,'0000-00-00').replace(/\{\w+\}/g,'0000').length;
 const boxW=l=>l.scroll?(l.width||300):Math.max(20,est(l.text)*(l.size||12)*.602);
 /* handles are updated in place (never rebuilt while the count is unchanged) so a drag survives preview reloads */
-function overlay(){const ov=$('ov');if(tab!=='Text'){ov.innerHTML='';return}
+function overlay(){const ov=$('ov');const mode=tab==='Text'?'text':(tab==='Elements'||tab==='Moods')?'ent':'';
+ if(ov.dataset.mode!==mode){ov.innerHTML='';ov.dataset.mode=mode}
+ if(!mode)return;const sc=$('prev').clientWidth/480;
+ if(mode==='ent'){const E_=info.entities.filter(e=>e.box).sort((a,b)=>area(b.box)-area(a.box));
+  if(ov.children.length!==E_.length){ov.innerHTML='';E_.forEach(e=>{const d=E('div',{class:'eb','data-key':e.key,title:e.key});d.addEventListener('click',()=>selectEntity(e.key));ov.append(d)})}
+  E_.forEach((e,i)=>{const[x0,y0,x1,y1]=e.box;ov.children[i].style.cssText='left:'+x0*sc+'px;top:'+y0*sc+'px;width:'+Math.max(4,(x1-x0)*sc)+'px;height:'+Math.max(4,(y1-y0)*sc)+'px'});return}
  const T=cur.text||[];
  if(ov.children.length!==T.length){ov.innerHTML='';T.forEach((l,i)=>{const d=E('div',{class:'h','data-i':i},'#'+(i+1));d.addEventListener('pointerdown',e=>drag(e,i,d));ov.append(d)})}
- const sc=$('prev').clientWidth/480;
  T.forEach((l,i)=>{const w=boxW(l),h=(l.size||12)+6;let x=l.x||0;if(l.align==='center')x-=w/2;else if(l.align==='right')x-=w;
   ov.children[i].style.cssText='left:'+x*sc+'px;top:'+(l.y||0)*sc+'px;width:'+w*sc+'px;height:'+h*sc+'px'})}
+const area=b=>(b[2]-b[0])*(b[3]-b[1]);
 function drag(e,i,d){e.preventDefault();d.setPointerCapture(e.pointerId);
  const sc=$('prev').clientWidth/480,sx=e.clientX,sy=e.clientY,l0=cur.text[i],ox=l0.x||0,oy=l0.y||0;
  const mv=ev=>{const l=cur.text[i];if(!l)return;l.x=clamp(Math.round(ox+(ev.clientX-sx)/sc),-480,960);l.y=clamp(Math.round(oy+(ev.clientY-sy)/sc),-320,640);
@@ -1488,7 +1565,7 @@ function render(){const g=$('grid');g.innerHTML='';
   if(f)c.append(E('small',{},' +'+f));g.append(c)}}
 function pick(){cur=normalize(clone(S.themes[sel]));delete cur.builtin;$('name').value=sel;pvMood=tab==='Moods'?mood:null;render();panel();overlay();schedule()}
 async function refresh(keep){S=await(await fetch(base+'/api/themes')).json();if(!S.themes[sel])sel=S.active;
- try{info.elements=await(await fetch(base+'/api/elements')).json();info.packs=await(await fetch(base+'/api/packs')).json()}catch(e){}
+ try{info.elements=await(await fetch(base+'/api/elements')).json();info.entities=await(await fetch(base+'/api/entities')).json();info.packs=await(await fetch(base+'/api/packs')).json()}catch(e){}
  if(keep){render()}else pick()}
 const nameOk=n=>/^[A-Za-z0-9_\- ]{1,32}$/.test(n);
 async function saveAs(n){const r=await(await post('save',{name:n,theme:prune(clone(cur))})).json();if(!r.ok)say(r.error);return r.ok}
@@ -1526,7 +1603,7 @@ if __name__ == "__main__":
         if a[1] not in tm._all():
             sys.exit("unknown theme")
         os.makedirs(THEME_DIR, exist_ok=True)
-        json.dump({"active": a[1]}, open(ACTIVE_FILE, "w"))
+        write_json(ACTIVE_FILE, {"active": a[1]})
         print("active ->", a[1], "(applies within seconds)")
     elif cmd == "new" and len(a) == 2 and NAME_RE.fullmatch(a[1]):
         p = os.path.join(THEME_DIR, a[1] + ".json")
@@ -1534,12 +1611,12 @@ if __name__ == "__main__":
             sys.exit(p + " exists")
         os.makedirs(THEME_DIR, exist_ok=True)
         tpl = dict(BUILTIN["cyberpunk"], description="my theme")
-        json.dump(tpl, open(p, "w"), indent=2)
+        write_json(p, tpl, indent=2)
         print("created", p)
     elif cmd == "mood" and len(a) in (2, 3) and a[1] in MOODS + ("off",):
         os.makedirs(THEME_DIR, exist_ok=True)
-        json.dump({"mood": None if a[1] == "off" else a[1], "until": time.time() + (float(a[2]) if len(a) == 3 else 15)},
-                  open(FORCE_FILE, "w"))
+        write_json(FORCE_FILE, {"mood": None if a[1] == "off" else a[1],
+                                "until": time.time() + (float(a[2]) if len(a) == 3 else 15)})
         print("mood ->", a[1])
     elif cmd == "validate" and len(a) == 2:
         try:

@@ -133,6 +133,11 @@ Custom text is drawn over everything else, so check the preview. Your layout may
 Plugins add their own (on this Pi: `Age`, `AgeStatus`, `Points`, `Progress`, `Strength`, `SkyHigh`, `bt-status`,
 `bt-detail`, `pass`). The **Elements** tab lists every name that exists right now, and you can type any other name.
 
+In the web editor you never need to type a name: **click the part on the preview** (a dotted box appears over each
+element) and its color square, "rainbow" switch and "reset" button show up right under the preview. The same colors
+are available as one row per element in the Elements tab. Moving a color square assigns that color at once; "reset"
+sends the element back to the theme color (it then shows "theme color").
+
 ```json
 "elements": {"face": "#00f0ff", "name": "#ff2a6d", "status": "#fcee0a", "shakes": "#ff2a6d"}
 ```
@@ -195,8 +200,8 @@ theme you are editing. Animated themes animate. Changes are only sent to the scr
 | Colors | four color pickers, gradient on/off with from/to pickers and direction, animation fps |
 | Effects | checkbox per effect with sliders for its settings |
 | Text | edit each text line, insert placeholders, **drag the green boxes on the preview** to position lines |
-| Elements | color per UI element, "rainbow" option |
-| Moods | pick a mood, set overrides, preview it, or show it on the real screen for 15 seconds |
+| Elements | one row per screen element with a color square, "rainbow" and "reset"; **click a part of the preview to pick it** |
+| Moods | pick a mood, set overrides (including per-element colors, also clickable on the preview), preview it, or show it on the real screen for 15 seconds |
 | Faces | choose a face pack, scale, offset, tint, see every face in the pack |
 | JSON | the whole theme as text, changes apply as you type (red border = invalid JSON) |
 
