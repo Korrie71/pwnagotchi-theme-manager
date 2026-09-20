@@ -15,7 +15,10 @@ import logging
 import math
 import os
 import random
+import contextlib
 import re
+import select
+import struct
 import threading
 import time
 
@@ -75,6 +78,7 @@ MOOD_FADE = 0.6    # seconds to blend between moods
 HANDSHAKE_FLASH = 4.0
 FORCE_FILE = os.path.join(THEME_DIR, "force_mood.json")
 FACES_DIR = os.path.join(THEME_DIR, "faces")
+STATE_FILES = ("active.json", "force_mood.json", "touch.json")   # JSON files in THEME_DIR that are not themes
 PACK_RE = re.compile(r"^[A-Za-z0-9_\-]{1,32}$")
 
 # Built-in themes. bg/fg/accent/web are required, everything else is optional.
@@ -771,6 +775,147 @@ def frame_interval(theme, t):
     return iv
 
 
+# ------------------------------------------------------------------ touch menu
+# Double tap on the screen opens a theme menu. The touch controller reports raw numbers, so the first time a
+# 4-point calibration maps them to screen pixels (saved in touch.json).
+TOUCH_FILE = os.path.join(THEME_DIR, "touch.json")
+EVENT = struct.Struct("@llHHi")            # struct input_event on 64-bit Linux (24 bytes)
+EV_SYN, EV_KEY, EV_ABS = 0, 1, 3
+BTN_TOUCH, ABS_X, ABS_Y = 0x14A, 0, 1
+DOUBLE_TAP_S = 0.6        # max time between the two taps
+DOUBLE_TAP_RAW = 900      # max distance between them, in raw units (range is 0-4095)
+TAP_MAX_S = 0.8           # longer presses are not taps
+MENU_TIMEOUT = 20.0
+CALIB_TIMEOUT = 60.0
+CALIB_POINTS = ((40, 40), (440, 40), (40, 280), (440, 280))
+MENU_ROWS = 5
+PROTECTED_PLUGINS = ('theme_manager',)   # never listed: switching it off would remove the menu itself
+
+
+@contextlib.contextmanager
+def config_save_guard():
+    """pwnagotchi's toggle_plugin rewrites config.toml from memory. Keep `personality.channels` as it is on disk, so
+    the channels the agent discovered at runtime don't get frozen into the file."""
+    import pwnagotchi.utils as u
+    orig = u.save_config
+
+    def guarded(config, target):
+        cur = None
+        try:
+            import tomllib
+            with open(target, "rb") as fp:
+                disk = tomllib.load(fp)["personality"]["channels"]
+            cur = config["personality"]["channels"]
+            config["personality"]["channels"] = disk
+        except Exception:
+            cur = None
+        try:
+            return orig(config, target)
+        finally:
+            if cur is not None:
+                config["personality"]["channels"] = cur
+    u.save_config = guarded
+    try:
+        yield
+    finally:
+        u.save_config = orig
+
+
+def find_touch_device(hint="ads7846"):
+    """/dev/input/eventN of the touchscreen, or None."""
+    try:
+        blocks = open("/proc/bus/input/devices").read().split("\n\n")
+    except OSError:
+        return None
+    for want in (hint, "touch"):
+        for b in blocks:
+            name = re.search(r'Name="([^"]*)"', b)
+            ev = re.search(r"Handlers=.*?\b(event\d+)\b", b)
+            if name and ev and want in name.group(1).lower():
+                return "/dev/input/" + ev.group(1)
+    return None
+
+
+def fit_affine(raw, screen):
+    """Least-squares affine map from raw touch points to screen points: ([a,b,c], [d,e,f]) and the worst error in px."""
+    A = np.array([[x, y, 1.0] for x, y in raw])
+    cx, *_ = np.linalg.lstsq(A, np.array([p[0] for p in screen], float), rcond=None)
+    cy, *_ = np.linalg.lstsq(A, np.array([p[1] for p in screen], float), rcond=None)
+    err = max(math.hypot(A[i] @ cx - screen[i][0], A[i] @ cy - screen[i][1]) for i in range(len(raw)))
+    return [list(map(float, cx)), list(map(float, cy))], float(err)
+
+
+def to_screen(m, x, y):
+    return int(m[0][0] * x + m[0][1] * y + m[0][2]), int(m[1][0] * x + m[1][1] * y + m[1][2])
+
+
+def menu_items(menu):
+    return menu["names"] if menu.get("tab", "themes") == "themes" else menu["plugins"]
+
+
+def menu_hits(menu):
+    """[(rect, (action, arg))] for the current menu page, in upright screen pixels."""
+    items, page, tab = menu_items(menu), menu["page"], menu.get("tab", "themes")
+    act = "pick" if tab == "themes" else "toggle"
+    hits = [((28, 44 + i * 44, 452, 44 + i * 44 + 40), (act, n))
+            for i, n in enumerate(items[page * MENU_ROWS:(page + 1) * MENU_ROWS])]
+    return hits + [((28, 268, 118, 308), ("prev", None)), ((124, 268, 214, 308), ("next", None)),
+                   ((220, 268, 320, 308), ("cal", None)), ((380, 268, 452, 308), ("close", None)),
+                   ((28, 10, 138, 38), ("tab", "themes")), ((144, 10, 254, 38), ("tab", "plugins"))]
+
+
+def _mixc(a, b, k):
+    return tuple(int(a[i] + (b[i] - a[i]) * k) for i in range(3))
+
+
+def draw_menu(img, menu, theme):
+    """Draw the menu (or the calibration prompt) onto an upright RGB frame."""
+    d = ImageDraw.Draw(img)
+    bg, fg, acc = _hex(theme["bg"]), _hex(theme["fg"]), _hex(theme["accent"])
+    panel, line = _mixc(bg, (0, 0, 0), 0.35), _mixc(bg, fg, 0.18)
+    d.rectangle((16, 8, 464, 312), fill=panel, outline=acc, width=2)
+    if menu["mode"] == "calib":
+        i = menu["step"]
+        d.text((240, 60), "Touch calibration", font=_font(22, True), fill=fg, anchor="mm")
+        d.text((240, 100), "tap the + mark (%d/%d)" % (i + 1, len(CALIB_POINTS)), font=_font(16), fill=fg, anchor="mm")
+        if menu.get("msg"):
+            d.text((240, 140), menu["msg"], font=_font(14), fill=acc, anchor="mm")
+        x, y = CALIB_POINTS[i]
+        d.line((x - 16, y, x + 16, y), fill=acc, width=3)
+        d.line((x, y - 16, x, y + 16), fill=acc, width=3)
+        d.ellipse((x - 9, y - 9, x + 9, y + 9), outline=fg, width=2)
+        return
+    tab, page = menu.get("tab", "themes"), menu["page"]
+    pages = max(1, -(-len(menu_items(menu)) // MENU_ROWS))
+    d.text((452, 16), "%d/%d" % (page + 1, pages), font=_font(14), fill=fg, anchor="ra")
+    for rect, (act, arg) in menu_hits(menu):
+        x0, y0, x1, y1 = rect
+        if act == "tab":
+            on = arg == tab
+            d.rectangle(rect, fill=acc if on else line, outline=acc, width=1)
+            d.text(((x0 + x1) // 2, (y0 + y1) // 2), arg.capitalize(), font=_font(16, True),
+                   fill=bg if on else fg, anchor="mm")
+        elif act == "pick":
+            cur = arg == menu["active"]
+            d.rectangle(rect, fill=line, outline=acc if cur else line, width=2)
+            d.text((x0 + 12, (y0 + y1) // 2), ("\u25CF " if cur else "") + arg, font=_font(20, cur), fill=fg, anchor="lm")
+            for j, key in enumerate(("bg", "fg", "accent")):
+                sx = x1 - 78 + j * 24
+                d.rectangle((sx, y0 + 10, sx + 18, y1 - 10), fill=_hex(menu["colors"][arg][key]), outline=fg)
+        elif act == "toggle":
+            busy, on, bad = arg in menu["busy"], arg in menu["on"], arg in menu.get("failed", ())
+            d.rectangle(rect, fill=line, outline=acc if on else line, width=2)
+            d.text((x0 + 12, (y0 + y1) // 2), arg if len(arg) <= 22 else arg[:21] + "\u2026", font=_font(20, on), fill=fg, anchor="lm")
+            px0, px1 = x1 - 82, x1 - 10
+            d.rounded_rectangle((px0, y0 + 7, px1, y1 - 7), 10, fill=acc if on and not busy else panel, outline=acc, width=2)
+            d.text(((px0 + px1) // 2, (y0 + y1) // 2), "..." if busy else ("ERR" if bad else "ON" if on else "OFF"), font=_font(16, True),
+                   fill=bg if on and not busy else fg, anchor="mm")
+        else:
+            label = {"prev": "<", "next": ">", "cal": "calibrate", "close": "close"}[act]
+            d.rectangle(rect, fill=line, outline=acc, width=1)
+            d.text(((x0 + x1) // 2, (y0 + y1) // 2), label, font=_font(16, True), fill=fg, anchor="mm")
+
+
 # --------------------------------------------------------------------- plugin
 class ThemeManager(plugins.Plugin):
     __author__ = "theme_manager contributors"
@@ -789,6 +934,12 @@ class ThemeManager(plugins.Plugin):
         self._running = False
         self._ctx = None
         self._wake = threading.Event()
+        self._menu = None
+        self._menu_lock = threading.Lock()
+        self._touch_m = None
+        self._last_tap = None
+        self._down = None
+        self._abs = [None, None]
         self._last_trim = 0
         self._face_multi = False
         self._mood = None
@@ -815,7 +966,7 @@ class ThemeManager(plugins.Plugin):
         themes = {}
         if os.path.isdir(THEME_DIR):
             for f in sorted(os.listdir(THEME_DIR)):
-                if f.endswith(".json") and f not in ("active.json", "force_mood.json"):
+                if f.endswith(".json") and f not in STATE_FILES:
                     try:
                         with open(os.path.join(THEME_DIR, f)) as fp:
                             themes[f[:-5]] = _clean(json.load(fp))
@@ -1021,7 +1172,11 @@ class ThemeManager(plugins.Plugin):
         if ctx is None:
             return None
         theme = theme or self._current(t)
-        return rotate(colorize(ctx["canvas"], theme, t, ctx["layers"], self._face_frame(theme, t)), self._rot)
+        img = colorize(ctx["canvas"], theme, t, ctx["layers"], self._face_frame(theme, t))
+        menu = self._menu
+        if menu is not None:
+            draw_menu(img, menu, self._theme)
+        return rotate(img, self._rot)
 
     def _present(self, img):
         """Write a frame to the framebuffer, sending only the rows that changed."""
@@ -1046,10 +1201,206 @@ class ThemeManager(plugins.Plugin):
         fbm.mm.write(v[r0:r1].astype("<u2").tobytes())
         self._prev = v
 
+    # ---- touch
+    def _load_touch(self):
+        try:
+            with open(TOUCH_FILE) as fp:
+                m = json.load(fp)["matrix"]
+            if len(m) == 2 and all(len(r) == 3 for r in m):
+                self._touch_m = m
+                return
+        except (OSError, ValueError, KeyError, TypeError):
+            pass
+        self._touch_m = None
+
+    def _refresh_now(self):
+        """Redraw the screen right away (menu opened/changed/closed)."""
+        try:
+            img = self._compose(time.time())
+            if img is not None:
+                with self._render_lock:
+                    self._present(img)
+        except Exception as e:
+            logging.error("[theme_manager] menu redraw: %s", e)
+
+    def _plugin_names(self):
+        try:
+            return sorted(n for n in plugins.database if n not in PROTECTED_PLUGINS)
+        except Exception:
+            return []
+
+    def open_menu(self, mode=None, tab="themes"):
+        now = time.time()
+        self._load_touch()
+        if mode is None:
+            mode = "list" if self._touch_m else "calib"
+        themes = self._all()
+        with self._menu_lock:
+            self._menu = {"mode": mode, "tab": tab if tab in ("themes", "plugins") else "themes", "page": 0,
+                          "pages": {"themes": 0, "plugins": 0}, "plugins": self._plugin_names(),
+                          "on": set(plugins.loaded), "busy": set(), "failed": set(), "step": 0, "raw": [], "names": list(themes),
+                          "colors": {n: t for n, t in themes.items()}, "active": self._active,
+                          "until": now + (CALIB_TIMEOUT if mode == "calib" else MENU_TIMEOUT)}
+        self._wake.set()
+        self._refresh_now()
+
+    def close_menu(self):
+        with self._menu_lock:
+            self._menu = None
+        self._refresh_now()
+
+    def menu_tick(self, now):
+        m = self._menu
+        if m is not None and now > m["until"]:
+            self.close_menu()
+
+    def on_tap(self, rx, ry, now):
+        """A finished tap at raw touch coordinates."""
+        menu = self._menu
+        if menu is None:
+            last = self._last_tap
+            if last and now - last[0] <= DOUBLE_TAP_S and abs(rx - last[1]) + abs(ry - last[2]) < DOUBLE_TAP_RAW:
+                self._last_tap = None
+                logging.info("[theme_manager] double tap: opening the theme menu")
+                self.open_menu()
+            else:
+                self._last_tap = (now, rx, ry)
+            return
+        if menu["mode"] == "calib":
+            menu["raw"].append((rx, ry))
+            menu["until"] = now + CALIB_TIMEOUT
+            if len(menu["raw"]) < len(CALIB_POINTS):
+                menu["step"] = len(menu["raw"])
+                menu.pop("msg", None)
+            else:
+                m, err = fit_affine(menu["raw"], CALIB_POINTS)
+                if err > 40:
+                    logging.warning("[theme_manager] calibration rejected (error %.0f px)", err)
+                    menu.update(step=0, raw=[], msg="that did not fit, try again")
+                else:
+                    write_json(TOUCH_FILE, {"matrix": m, "error_px": round(err, 1)})
+                    logging.info("[theme_manager] touch calibrated (error %.1f px)", err)
+                    self._touch_m = m
+                    menu.update(mode="list", page=0)
+                    menu["until"] = now + MENU_TIMEOUT
+            self._refresh_now()
+            return
+        if self._touch_m is None:
+            return
+        x, y = to_screen(self._touch_m, rx, ry)
+        menu["until"] = now + MENU_TIMEOUT
+        for (x0, y0, x1, y1), (act, arg) in menu_hits(menu):
+            if x0 <= x <= x1 and y0 <= y <= y1:
+                pages = max(1, -(-len(menu_items(menu)) // MENU_ROWS))
+                if act == "tab":
+                    menu["pages"][menu["tab"]] = menu["page"]
+                    menu["tab"] = arg
+                    menu["page"] = menu["pages"][arg]
+                elif act == "toggle":
+                    if arg not in menu["busy"]:
+                        menu["busy"].add(arg)
+                        threading.Thread(target=self._toggle_plugin, args=(arg, menu), daemon=True, name="theme-toggle").start()
+                elif act == "pick":
+                    self.close_menu()
+                    try:
+                        self._apply(arg, persist=True)
+                    except KeyError:
+                        pass
+                    return
+                elif act == "prev":
+                    menu["page"] = (menu["page"] - 1) % pages
+                elif act == "next":
+                    menu["page"] = (menu["page"] + 1) % pages
+                elif act == "cal":
+                    menu.update(mode="calib", step=0, raw=[])
+                    menu["until"] = now + CALIB_TIMEOUT
+                else:
+                    self.close_menu()
+                    return
+                self._refresh_now()
+                return
+        if not (16 <= x <= 464 and 8 <= y <= 312):   # a tap outside the panel closes it
+            self.close_menu()
+
+    def _forget_enabled(self, name):
+        """toggle_plugin marks a plugin enabled before loading it. If it could not load, don't leave that in config.toml."""
+        try:
+            import pwnagotchi
+            from pwnagotchi.utils import save_config
+            if pwnagotchi.config and name in pwnagotchi.config["main"]["plugins"]:
+                pwnagotchi.config["main"]["plugins"][name]["enabled"] = False
+                with config_save_guard():
+                    import pwnagotchi.utils as u
+                    u.save_config(pwnagotchi.config, "/etc/pwnagotchi/config.toml")
+        except Exception as e:
+            logging.debug("[theme_manager] could not reset %s in the config: %s", name, e)
+
+    def _toggle_plugin(self, name, menu):
+        """Enable/disable one plugin like the web UI does (persisted), off the touch thread because enabling takes seconds."""
+        self._refresh_now()
+        try:
+            want = name not in plugins.loaded
+            with config_save_guard():
+                plugins.toggle_plugin(name, want)
+            logging.info("[theme_manager] plugin %s %s from the touch menu", name, "enabled" if want else "disabled")
+            menu["failed"].discard(name)
+        except Exception as e:
+            logging.error("[theme_manager] toggling %s failed: %s", name, e)
+            menu["failed"].add(name)
+            if want:
+                self._forget_enabled(name)
+        finally:
+            menu["on"] = set(plugins.loaded)
+            menu["busy"].discard(name)
+            menu["until"] = time.time() + MENU_TIMEOUT
+            self._refresh_now()
+
+    def feed(self, etype, code, value, now):
+        """One input event from the touch controller."""
+        if etype == EV_ABS and code in (ABS_X, ABS_Y):
+            self._abs[code] = value
+        elif etype == EV_KEY and code == BTN_TOUCH:
+            if value:
+                self._down = (now, [])
+            elif self._down:
+                t0, samples = self._down
+                self._down = None
+                if samples and now - t0 <= TAP_MAX_S:
+                    xs, ys = sorted(p[0] for p in samples), sorted(p[1] for p in samples)
+                    self.on_tap(xs[len(xs) // 2], ys[len(ys) // 2], now)
+        elif etype == EV_SYN and self._down and None not in self._abs:
+            self._down[1].append(tuple(self._abs))
+
+    def _touch_loop(self, path):
+        try:
+            fd = os.open(path, os.O_RDONLY | os.O_NONBLOCK)
+        except OSError as e:
+            logging.warning("[theme_manager] touch device %s: %s", path, e)
+            return
+        logging.info("[theme_manager] touch menu ready on %s (double tap the screen)", path)
+        try:
+            buf = b""
+            while self._running:
+                if not select.select([fd], [], [], 1.0)[0]:
+                    continue
+                buf += os.read(fd, EVENT.size * 32)
+                while len(buf) >= EVENT.size:
+                    _, _, etype, code, value = EVENT.unpack(buf[:EVENT.size])
+                    buf = buf[EVENT.size:]
+                    try:
+                        self.feed(etype, code, value, time.time())
+                    except Exception as e:
+                        logging.error("[theme_manager] touch: %s", e)
+        except OSError as e:
+            logging.warning("[theme_manager] touch reader stopped: %s", e)
+        finally:
+            os.close(fd)
+
     def _anim_loop(self):
         while self._running:
             start = time.time()
             self._poll_files()
+            self.menu_tick(start)
             if start - self._last_trim > 20:
                 self._last_trim = start
                 trim_memory()
@@ -1155,6 +1506,12 @@ class ThemeManager(plugins.Plugin):
         self._apply_faces(self._theme)
         self._running = True
         threading.Thread(target=self._anim_loop, daemon=True, name="theme-anim").start()
+        dev = find_touch_device()
+        if dev:
+            self._load_touch()
+            threading.Thread(target=self._touch_loop, args=(dev,), daemon=True, name="theme-touch").start()
+        else:
+            logging.info("[theme_manager] no touchscreen found, touch menu disabled")
 
     def on_ui_setup(self, ui):
         self._view = ui
@@ -1178,6 +1535,7 @@ class ThemeManager(plugins.Plugin):
             except AttributeError:
                 pass
         self._wrapped = []
+        self._menu = None
         self._ctx = self._building = self._prev = None  # drop references to frames and framebuffer copies
         with _cache_lock:
             _cache.clear()
@@ -1280,6 +1638,12 @@ class ThemeManager(plugins.Plugin):
         if request.method == "POST":
             data = _body(request)
             try:
+                if path == "api/menu":
+                    if data.get("open", True):
+                        self.open_menu(data.get("mode") if data.get("mode") in ("list", "calib") else None, data.get("tab", "themes"))
+                    else:
+                        self.close_menu()
+                    return jsonify({"ok": True})
                 if path == "api/mood":
                     mood = data.get("mood")
                     if mood not in MOODS and mood is not None:

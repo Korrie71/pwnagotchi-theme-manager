@@ -209,6 +209,29 @@ Buttons: **Save** stores the theme under the name in the box (built-in themes ca
 **Apply to screen** saves if needed and makes it the active theme, **Export** downloads the JSON,
 **Import** loads a JSON file into the editor (press Save to keep it), **Delete** removes a custom theme.
 
+## Touch menu
+
+Double tap the screen (two quick taps in about the same place) and a menu with all your themes appears. Tap a theme
+to switch to it, `<` and `>` change page, `close` (or a tap outside the menu, or 20 seconds of nothing) closes it.
+The active theme has a dot. Each row shows the theme's background, ink and bar colors.
+
+The first time, the menu asks for a quick **touch calibration**: tap the four `+` marks in the corners. The touch
+controller reports raw numbers, so this teaches the plugin where your screen is. It only needs doing once and is saved in
+`/etc/pwnagotchi/themes/touch.json`. Use the `calibrate` button in the menu (or delete `touch.json`) to redo it.
+
+The menu has two tabs. **Themes** switches theme. **Plugins** lists every installed plugin with an `ON`/`OFF` switch: tap a
+row to enable or disable that plugin right away, exactly like the switch on the web plugin page (the change is saved in
+`config.toml` and lasts after a reboot). While a plugin is switching the row shows `...`; enabling one can take a few
+seconds. `theme_manager` itself is never listed, so you can't switch off the menu from the menu. Pwnagotchi rewrites
+`config.toml` when a plugin is toggled; the plugin keeps your `personality.channels` line exactly as it was on disk.
+
+It costs nothing while idle: one small thread sleeps until the screen is touched. Menu and calibration screens are drawn
+with the active theme's colors, so custom themes get a matching menu automatically.
+
+If nothing happens, check `journalctl`-style output in `/etc/pwnagotchi/log/pwnagotchi.log` for `theme_manager`:
+`touch menu ready on /dev/input/eventN` means the touch reader is running, `double tap: opening the theme menu` means
+the gesture was recognised. No touchscreen found means the menu is simply disabled.
+
 ## Tips
 
 - Keep `fg` and `bg` far apart in brightness, otherwise the text is unreadable.

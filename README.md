@@ -11,13 +11,15 @@ Pwnagotchi draws in black and white; this plugin turns that into full-color them
 - **Custom text lines** with placeholders (`{name}`, `{time}`, `{cpu}`, `{temp}`...) and scrolling marquees
 - **Mood-reactive themes:** colors and effects follow pwnagotchi's face (sad, angry, happy...), with smooth blending and a flash on new handshakes
 - **Face packs:** replace the text face with PNG or GIF images per mood, in color or tinted by the theme
-- **Web editor** with live preview: sliders, gradient picker, drag-to-place text, import/export
+- **Web editor** with live preview: sliders, gradient picker, drag-to-place text, click a part of the preview to recolor it, import/export
+- **Touch menu:** double tap the screen to switch themes, or to enable/disable pwnagotchi plugins on the fly
 - Themes are small JSON files you can share
 
 ## Requirements
 
 - pwnagotchi 2.9.x (jayofelony fork)
 - Python packages pwnagotchi already ships: Pillow, numpy, Flask
+- Optional, for the touch menu: a touchscreen that shows up under `/dev/input` (for example an ADS7846/XPT2046 controller)
 
 ## Install
 
@@ -52,6 +54,12 @@ $P validate FILE.json
 $P mood sad 20           # preview a mood for 20 seconds
 ```
 
+**Touch menu:** double tap the screen (two quick taps in about the same place). The first time you are asked to tap four
+`+` marks in the corners to calibrate. Then the **Themes** tab switches theme with one tap, and the **Plugins** tab lists every
+installed plugin with an `ON`/`OFF` switch that takes effect immediately and is saved to `config.toml`. A plugin that
+fails to load shows `ERR` and is set back to disabled. `close`, a tap outside the menu, or 20 seconds of nothing closes it.
+It costs nothing while idle: one thread sleeps until the screen is touched.
+
 The full guide to writing themes (every field, effect, placeholder and mood) is in [docs/THEMES.md](docs/THEMES.md).
 
 ## How it works
@@ -63,8 +71,10 @@ framebuffer, static parts are cached, and animation slows down when the system i
 ## Notes
 
 - Enabling or disabling the plugin from pwnagotchi's plugin page works live.
-- Pwnagotchi rewrites `config.toml` from memory when plugins are toggled. Check the file afterwards if you rely on
-  `channels = []`.
+- The touch menu reads raw touch events itself and needs no extra Python packages. The calibration is stored in
+  `/etc/pwnagotchi/themes/touch.json`; delete it (or use the menu's `calibrate` button) to redo it.
+- Pwnagotchi rewrites `config.toml` from memory when a plugin is toggled. The touch menu keeps `personality.channels` exactly as
+  it is on disk; toggling from the web plugin page does not, so check that line if you rely on `channels = []`.
 - The web accent color of pwnagotchi's own UI follows the active theme.
 
 ## License
