@@ -1,0 +1,13 @@
+{
+  "description": "example: green terminal with a status ticker",
+  "bg": "#020a02",
+  "fg": "#39ff14",
+  "accent": "#ff00aa",
+  "web": "#39ff14",
+  "fps": 6,
+  "effects": ["scanlines", {"type": "glow", "radius": 2, "strength": 0.7}, {"type": "border", "size": 2, "color": "#ff00aa"}],
+  "text": [
+    {"text": "root@{name}:~# cpu {cpu} temp {temp} mem {mem}", "x": 10, "y": 278, "size": 11},
+    {"text": "{date}", "x": 470, "y": 20, "size": 10, "align": "right", "color": "#ff00aa"}
+  ]
+}

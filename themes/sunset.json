@@ -1,0 +1,10 @@
+{
+  "description": "example: warm gradient with pulsing ink",
+  "bg": "#1a0533",
+  "fg": "#fff1c1",
+  "accent": "#ff5e78",
+  "web": "#ff5e78",
+  "gradient": {"from": "#1a0533", "to": "#8a2a3a", "direction": "vertical"},
+  "effects": [{"type": "pulse", "speed": 2, "strength": 0.25}, {"type": "vignette", "strength": 0.5}],
+  "text": [{"text": "golden hour {time}", "x": 240, "y": 270, "size": 12, "align": "center"}]
+}
