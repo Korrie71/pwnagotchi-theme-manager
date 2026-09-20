@@ -206,8 +206,8 @@ def _clean_effect(e):
 
 
 def _clean_text(t):
-    if not isinstance(t, dict) or "text" not in t:
-        raise ValueError("each text line needs a 'text' field")
+    if not isinstance(t, dict) or not isinstance(t.get("text"), str):
+        raise ValueError("each text line needs a 'text' field with a string")
     out = {"text": str(t["text"])[:200],
            "x": int(_num(t.get("x", 0), -480, 960, "text.x")),
            "y": int(_num(t.get("y", 0), -320, 640, "text.y")),

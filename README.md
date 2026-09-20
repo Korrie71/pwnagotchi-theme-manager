@@ -1,9 +1,28 @@
-# pwnagotchi theme manager
+<h1 align="center">pwnagotchi theme manager</h1>
 
-A theme engine for [pwnagotchi](https://pwnagotchi.org) on a **3.5" framebuffer LCD** (`waveshare35lcd`, 480x320).
-Pwnagotchi draws in black and white; this plugin turns that into full-color themes, live.
+<p align="center">
+Full-color themes, animated effects, mood-reactive faces and a touch menu for the 3.5" LCD of your
+<a href="https://pwnagotchi.org">pwnagotchi</a>.
+</p>
 
-![Some of the built-in themes](docs/images/themes.png)
+<p align="center">
+<a href="https://github.com/Korrie71/pwnagotchi-theme-manager/actions/workflows/tests.yml"><img src="https://github.com/Korrie71/pwnagotchi-theme-manager/actions/workflows/tests.yml/badge.svg" alt="tests"></a>
+<img src="https://img.shields.io/badge/license-GPL--3.0-blue" alt="GPL-3.0">
+<img src="https://img.shields.io/badge/python-3.11%2B-blue" alt="Python 3.11+">
+<img src="https://img.shields.io/badge/pwnagotchi-2.9.x-green" alt="pwnagotchi 2.9.x">
+<img src="https://img.shields.io/badge/display-waveshare35lcd-orange" alt="waveshare35lcd">
+</p>
+
+<p align="center"><img src="docs/images/demo.gif" alt="Animated demo: matrix rain, glitch, rainbow, mood changes"></p>
+
+Pwnagotchi draws its screen in black and white. This plugin recolors it live: pick a theme and you get colors,
+gradients, glow, scanlines, rain, stars, per-element colors, custom text with live values, and a face that changes color
+with pwnagotchi's mood. Themes are small JSON files you can edit in a web editor or by hand and share.
+
+## Contents
+
+[Features](#features) · [Screenshots](#screenshots) · [Install](#install) · [Use](#use) · [Make your own theme](#make-your-own-theme) ·
+[Known limits](#known-limits) · [How it works](#how-it-works) · [Development](#development) · [Contributing](#contributing) · [License](#license)
 
 ## Features
 
@@ -15,11 +34,14 @@ Pwnagotchi draws in black and white; this plugin turns that into full-color them
 - **Face packs:** replace the text face with PNG or GIF images per mood, in color or tinted by the theme
 - **Web editor** with live preview: sliders, gradient picker, drag-to-place text, click a part of the preview to recolor it, import/export
 - **Touch menu:** double tap the screen to switch themes, enable/disable pwnagotchi plugins on the fly, or see system status and restart/reboot/shut down
-- Themes are small JSON files you can share
+- **Light:** only changed screen rows are sent to the display, static parts are cached, and animation backs off when the system is busy
 
 ## Screenshots
 
-Everything below is rendered from made-up data (a fake name, fake stats), by the plugin's own drawing code.
+Everything below is rendered from made-up data (a fake name, fake stats) by the plugin's own drawing code. You can
+regenerate the images with `python tools/make_screenshots.py`.
+
+![Some of the built-in themes](docs/images/themes.png)
 
 **Mood-reactive themes** change colors and effects with pwnagotchi's face:
 
@@ -44,70 +66,129 @@ Everything below is rendered from made-up data (a fake name, fake stats), by the
 <img src="docs/images/editor-entities.png" width="49%" alt="Editor, element colors">
 </p>
 
-## Requirements
-
-- pwnagotchi 2.9.x (jayofelony fork)
-- Python packages pwnagotchi already ships: Pillow, numpy, Flask
-- Optional, for the touch menu: a touchscreen that shows up under `/dev/input` (for example an ADS7846/XPT2046 controller)
-
 ## Install
+
+Requirements: pwnagotchi 2.9.x (the jayofelony fork) with a `waveshare35lcd` display. Pillow, numpy and Flask are already
+part of pwnagotchi. The touch menu additionally needs a touchscreen that shows up under `/dev/input`
+(for example an ADS7846/XPT2046 controller).
+
+```bash
+git clone https://github.com/Korrie71/pwnagotchi-theme-manager.git
+cd pwnagotchi-theme-manager
+sudo ./install.sh --restart
+```
+
+`install.sh` copies the plugin, the guide, example themes and face packs, and enables the plugin in `config.toml` (it
+backs the file up first, and never overwrites your own themes). Run `./install.sh --help` for the options, and
+`sudo ./install.sh --uninstall` to remove it again.
+
+<details>
+<summary>Install by hand instead</summary>
 
 ```bash
 sudo cp theme_manager.py /etc/pwnagotchi/custom-plugins/
 sudo mkdir -p /etc/pwnagotchi/themes/faces
-sudo cp docs/THEMES.md /etc/pwnagotchi/themes/README.md      # the guide shown in the web editor
-sudo cp themes/*.json /etc/pwnagotchi/themes/                # optional example themes
-sudo cp -r faces/blob faces/outline /etc/pwnagotchi/themes/faces/   # optional example face packs
+sudo cp docs/THEMES.md /etc/pwnagotchi/themes/README.md              # the guide shown in the web editor
+sudo cp themes/*.json /etc/pwnagotchi/themes/                        # optional example themes
+sudo cp -r faces/blob faces/outline /etc/pwnagotchi/themes/faces/    # optional example face packs
 ```
 
-Enable it in `/etc/pwnagotchi/config.toml`:
+Then add this to `/etc/pwnagotchi/config.toml` and run `sudo systemctl restart pwnagotchi`:
 
 ```toml
 [main.plugins.theme_manager]
 enabled = true
 ```
 
-Then `sudo systemctl restart pwnagotchi`.
+</details>
 
 ## Use
 
-- **Web editor:** `http://<pi-address>:8080/plugins/theme_manager/`
-- **CLI** (use pwnagotchi's Python):
+**Web editor:** open `http://<pi-address>:8080/plugins/theme_manager/`. Pick a theme, change colors and effects, drag text
+lines on the preview, click a part of the screen to recolor it, then **Apply to screen**. Themes you save appear in the list.
+
+**Command line** (use pwnagotchi's Python):
 
 ```bash
 P="sudo /opt/.pwn/bin/python3 /etc/pwnagotchi/custom-plugins/theme_manager.py"
 $P list                  # themes, * = active
 $P set matrix            # switch theme (applies within seconds)
 $P new mytheme           # create a template to edit
-$P validate FILE.json
+$P validate FILE.json    # check a theme file
 $P mood sad 20           # preview a mood for 20 seconds
 ```
 
 **Touch menu:** double tap the screen (two quick taps in about the same place). The first time you are asked to tap four
-`+` marks in the corners to calibrate. Then the **Themes** tab switches theme with one tap, and the **Plugins** tab lists every
-installed plugin with an `ON`/`OFF` switch that takes effect immediately and is saved to `config.toml`. A plugin that
-fails to load shows `ERR` and is set back to disabled. The **System** tab shows temperature, load, RAM, IP, GPS status,
-uptime, power state and handshake counts, and has `restart`, `reboot`, `shutdown` and AUTO/MANU mode buttons that each
-need a second tap to confirm. `close`, a tap outside the menu, or 20 seconds of nothing closes it.
-It costs nothing while idle: one thread sleeps until the screen is touched.
+`+` marks in the corners to calibrate. Then:
 
-The full guide to writing themes (every field, effect, placeholder and mood) is in [docs/THEMES.md](docs/THEMES.md).
+| tab | what it does |
+|---|---|
+| **Themes** | switch theme with one tap |
+| **Plugins** | every installed plugin with an `ON`/`OFF` switch that takes effect immediately and is saved to `config.toml`; a plugin that fails to load shows `ERR` and is set back to disabled |
+| **System** | temperature, load, RAM, IP, GPS status, uptime, power state, handshake counts; `restart`, `reboot`, `shutdown` and AUTO/MANU mode buttons that each need a second tap to confirm |
+
+`close`, a tap outside the menu, or 20 seconds of nothing closes it. It costs nothing while idle: one thread sleeps until
+the screen is touched.
+
+## Make your own theme
+
+A theme is one JSON file in `/etc/pwnagotchi/themes/`:
+
+```json
+{
+  "bg": "#0d0221", "fg": "#00f0ff", "accent": "#ff2a6d", "web": "#ff2a6d",
+  "gradient": {"from": "#0d0221", "to": "#2a0845", "direction": "vertical"},
+  "effects": [{"type": "glow", "radius": 3}, {"type": "glitch", "interval": 5}, "scanlines"],
+  "elements": {"face": "#00f0ff", "name": "#ff2a6d"},
+  "text": [{"text": "{name} {time}  {ip}", "x": 10, "y": 278, "size": 12}],
+  "mood": {"sad": {"fg": "#5b7cff", "elements": {"face": "#5b7cff"}}}
+}
+```
+
+The full guide (every field, effect, placeholder, mood and face pack) is in [docs/THEMES.md](docs/THEMES.md), and the
+web editor links to it. Two example themes are in [`themes/`](themes), and two face packs in [`faces/`](faces).
+
+## Known limits
+
+- **Display:** it only supports pwnagotchi's `waveshare35lcd` framebuffer display (480x320, 16-bit). On any other display
+  the plugin loads, says so in the log, and does nothing.
+- **Version:** developed and tested on pwnagotchi 2.9.5.9 (jayofelony fork) on a Raspberry Pi 5.
+- **Colors:** pwnagotchi draws in 1 bit, so individual on-screen elements can be recolored, but a single element can't
+  contain several colors of its own. Face packs (images) can.
+- **Touch:** the touch menu needs a touchscreen that appears as an input device; without one it is simply disabled.
+- **Power buttons:** `restart`, `reboot` and `shutdown` in the System tab do what they say. Each needs a second tap.
+- **Config file:** pwnagotchi rewrites `config.toml` from memory whenever a plugin is toggled. The touch menu keeps
+  `personality.channels` exactly as it is on disk; toggling from the web plugin page does not, so check that line if you
+  rely on `channels = []`.
+- **GPS values** (`{gps}`, `{lat}`, `{lon}`, `{sats}`) need pwnagotchi's `gps` plugin, which enables bettercap's GPS module.
 
 ## How it works
 
 Pwnagotchi renders a 1-bit canvas. The plugin wraps the display's `render()` and recolors each frame, and wraps each UI
 element's `draw()` to learn which pixels belong to which element. Only changed screen rows are written to the
-framebuffer, static parts are cached, and animation slows down when the system is busy.
+framebuffer, static parts are cached, and animation slows down when the system is busy. The touch menu reads raw
+`input_event`s from the touch controller itself and is calibrated with four taps (stored in
+`/etc/pwnagotchi/themes/touch.json`). The web accent color of pwnagotchi's own UI follows the active theme.
 
-## Notes
+## Development
 
-- Enabling or disabling the plugin from pwnagotchi's plugin page works live.
-- The touch menu reads raw touch events itself and needs no extra Python packages. The calibration is stored in
-  `/etc/pwnagotchi/themes/touch.json`; delete it (or use the menu's `calibrate` button) to redo it.
-- Pwnagotchi rewrites `config.toml` from memory when a plugin is toggled. The touch menu keeps `personality.channels` exactly as
-  it is on disk; toggling from the web plugin page does not, so check that line if you rely on `channels = []`.
-- The web accent color of pwnagotchi's own UI follows the active theme.
-- The GPS placeholders (`{gps}`, `{lat}`, `{lon}`, `{sats}`) need pwnagotchi's `gps` plugin, which enables bettercap's GPS module.
+The tests need only `numpy` and `Pillow`, not a Raspberry Pi: a small stand-in for pwnagotchi lives in
+[`tests/stubs`](tests/stubs).
+
+```bash
+pip install numpy pillow
+python tests/run_all.py            # or run any tests/test_*.py on its own
+```
+
+They cover theme validation and rendering (including a fuzz test), per-element colors, moods, face packs, the touch
+menu and calibration, plugin switching, the System tab, the placeholders, the install script, and a scan that keeps
+personal data out of the repository. The tools in [`tools/`](tools) regenerate the screenshots and the demo GIF from
+made-up data. GitHub Actions runs the tests on every push.
+
+## Contributing
+
+Themes, face packs, bug reports and ideas are welcome, see [CONTRIBUTING.md](CONTRIBUTING.md). Please never post
+screenshots or logs that show your device name, network names or addresses.
 
 ## License
 
