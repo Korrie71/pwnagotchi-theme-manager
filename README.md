@@ -16,10 +16,8 @@ Pwnagotchi draws in black and white; this plugin turns that into full-color them
 
 ## Requirements
 
-- pwnagotchi 2.9.x (jayofelony fork) with `ui.display.type = "waveshare35lcd"` (a 16-bit framebuffer at `/dev/fb0`)
+- pwnagotchi 2.9.x (jayofelony fork)
 - Python packages pwnagotchi already ships: Pillow, numpy, Flask
-
-Other displays are not supported: the plugin skips itself unless the display is `waveshare35lcd`.
 
 ## Install
 
