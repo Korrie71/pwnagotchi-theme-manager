@@ -55,7 +55,7 @@ menu = {"mode": "list", "tab": "themes", "page": 0, "pages": {}, "names": list(t
                     "session-stats", "switcher", "webcfg", "webgpsmap", "wpa-sec"],
         "on": {"auto_backup", "auto-update", "bt-tether", "fix_services", "gps", "grid", "webcfg", "wpa-sec"},
         "busy": set(), "failed": set(), "confirm": None,
-        "lines": ["CPU 48C  load 12%  RAM 21%", "IP 192.168.0.42", "GPS FIX 9sat  48.85837 2.29448",
+        "lines": ["CPU 48C  load 12%  RAM 21%", "IP 192.0.2.42", "GPS FIX 9sat  48.85837 2.29448",
                   "Up 03:12:45  Power OK  Bat n/a", "Pwned 27  Cracked 3  Session 4"], "mode_now": "AUTO"}
 for name, extra in (("menu-themes.png", {"tab": "themes", "page": 1}), ("menu-plugins.png", {"tab": "plugins", "busy": {"bt-tether"}}),
                     ("menu-system.png", {"tab": "system"})):

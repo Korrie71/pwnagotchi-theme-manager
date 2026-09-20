@@ -48,7 +48,7 @@ big = [p for p in glob.glob(os.path.join(ROOT, "docs", "images", "*")) if os.pat
 ok("no README image is huge", not big, big)
 
 # ---------------------------------------------------------------- nothing personal or secret
-tracked = subprocess.run(["git", "ls-files"], cwd=ROOT, capture_output=True, text=True).stdout.split() \
+tracked = subprocess.run(["git", "ls-files", "--cached", "--others", "--exclude-standard"], cwd=ROOT, capture_output=True, text=True).stdout.split() \
     if os.path.isdir(os.path.join(ROOT, ".git")) else [os.path.relpath(p, ROOT) for p in glob.glob(os.path.join(ROOT, "**", "*"), recursive=True) if os.path.isfile(p)]
 text_files = [f for f in tracked if f.endswith((".py", ".md", ".json", ".sh", ".yml", ".yaml", ".txt", ".html")) and "__pycache__" not in f]
 problems = []
