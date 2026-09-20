@@ -246,10 +246,14 @@ A plugin that cannot be loaded (for example because its file has an error) shows
 
 **System** shows CPU temperature and load, RAM, IP address, GPS status, uptime, power state, battery, and your handshake
 and cracked-password counts, refreshed every second. Below it are the buttons `Mode`, `restart`, `reboot` and
-`shutdown`. Each one asks for a **second tap** ("tap again", within 4 seconds) before it does anything, and any other
+`shutdown`, and `refresh` at the bottom left. Each one asks for a **second tap** ("tap again", within 4 seconds) before it does anything, and any other
 tap cancels it. `restart` restarts pwnagotchi in the current mode, `Mode` restarts it in the other mode (AUTO or MANU),
 `reboot` and `shutdown` do what they say. They call the same pwnagotchi functions as the web UI's buttons, except that
 `restart` and `Mode` leave bettercap running, so the Wi-Fi driver is not reloaded.
+
+`refresh` needs no confirmation: it flashes the panel black and writes the whole screen again. Use it when the display
+looks garbled or stuck (the plugin normally sends only the rows that changed, so a glitch on the panel can otherwise
+stay until that spot changes).
 
 It costs nothing while idle: one small thread sleeps until the screen is touched. Menu and calibration screens are drawn
 with the active theme's colors, so custom themes get a matching menu automatically.
@@ -257,6 +261,24 @@ with the active theme's colors, so custom themes get a matching menu automatical
 If nothing happens, check `journalctl`-style output in `/etc/pwnagotchi/log/pwnagotchi.log` for `theme_manager`:
 `touch menu ready on /dev/input/eventN` means the touch reader is running, `double tap: opening the theme menu` means
 the gesture was recognised. No touchscreen found means the menu is simply disabled.
+
+## Keeping it cool
+
+The plugin protects the Pi from overheating in two ways, with nothing to configure:
+
+- **Thermal guard.** Above 75 C the animation runs at half rate, and above 80 C it pauses (the screen still redraws
+  whenever pwnagotchi itself changes something). It resumes 3 degrees below where it slowed down, so it does not flap.
+  A line in the log says when it slows down or resumes. The Pi 5 starts throttling on its own at 85 C.
+- **GPS watchdog.** If a USB GPS receiver is unplugged, or gets a new name (`ttyACM0` becomes `ttyACM1` after a
+  reboot), bettercap keeps spinning on the dead file handle and uses a whole CPU core, which heats the Pi. Every 30
+  seconds the plugin looks for that situation, resets bettercap's GPS module the same way pwnagotchi's `gps` plugin
+  starts it, and switches it on again when the device is back.
+
+To make the name stable in the first place, point the `gps` plugin at the `/dev/serial/by-id/...` path instead of
+`/dev/ttyACM0` (`ls /dev/serial/by-id/` shows it). It always leads to the same receiver, whatever number it gets.
+
+If the Pi still runs hot, the biggest help is hardware: an active cooler or a fan on the Pi 5's fan connector.
+`{temp}` on a text line, or the System tab, shows the temperature.
 
 ## Tips
 

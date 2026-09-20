@@ -864,6 +864,44 @@ def rotate(img, deg):
     return img.transpose(_ROT[deg]) if deg in _ROT else img
 
 
+THERMAL_SLOW_C = 75       # animation runs at half rate above this CPU temperature
+THERMAL_STOP_C = 80       # ...and pauses above this one (Pi 5 starts throttling itself at 85)
+TEMP_FILE = "/sys/class/thermal/thermal_zone0/temp"
+GUARD_S = 30              # how often to look for a GPS device that bettercap lost
+
+
+def cpu_temp(path=TEMP_FILE):
+    return int(open(path).read()) / 1000.0
+
+
+def heat_factor(temp, current=1.0):
+    """Animation speed multiplier for a CPU temperature: 1.0 normal, 2.0 slow, None paused.
+    Each state is left 3 degrees below the temperature that entered it, so it does not flap."""
+    if temp >= THERMAL_STOP_C - (3 if current is None else 0):
+        return None
+    if temp >= THERMAL_SLOW_C - (3 if current in (2.0, None) else 0):
+        return 2.0
+    return 1.0
+
+
+def stale_tty_owner(proc="/proc"):
+    """(pid, device) if bettercap holds a /dev/tty* file that no longer exists (a GPS receiver that was unplugged
+    or renumbered). Bettercap then spins on the dead handle and burns a whole CPU core, else None."""
+    for entry in os.listdir(proc):
+        if not entry.isdigit():
+            continue
+        try:
+            if open("%s/%s/comm" % (proc, entry)).read().strip() != "bettercap":
+                continue
+            for fd in os.listdir("%s/%s/fd" % (proc, entry)):
+                target = os.readlink("%s/%s/fd/%s" % (proc, entry, fd))
+                if target.startswith("/dev/tty") and target.endswith(" (deleted)"):
+                    return int(entry), target[:-len(" (deleted)")]
+        except OSError:
+            continue
+    return None
+
+
 def frame_interval(theme, t):
     """Seconds until the next animation frame is worth drawing."""
     fx = {e["type"]: e for e in theme.get("effects", [])}
@@ -972,7 +1010,7 @@ def menu_hits(menu):
     tabs = [(rect, ("tab", name)) for name, rect in TABS]
     common = [((220, 268, 320, 308), ("cal", None)), ((380, 268, 452, 308), ("close", None))] + tabs
     if tab == "system":
-        return [((28, 166, 452, 200), ("mode", None)), ((28, 208, 152, 248), ("power", "restart")),
+        return [((28, 268, 118, 308), ("refresh", None)), ((28, 166, 452, 200), ("mode", None)), ((28, 208, 152, 248), ("power", "restart")),
                 ((158, 208, 282, 248), ("power", "reboot")), ((288, 208, 412, 248), ("power", "shutdown"))] + common
     act = "pick" if tab == "themes" else "toggle"
     hits = [((28, 44 + i * 44, 452, 44 + i * 44 + 40), (act, n))
@@ -1041,7 +1079,7 @@ def draw_menu(img, menu, theme):
             d.text(((px0 + px1) // 2, (y0 + y1) // 2), "..." if busy else ("ERR" if bad else "ON" if on else "OFF"), font=_font(16, True),
                    fill=bg if on and not busy else fg, anchor="mm")
         else:
-            label = {"prev": "<", "next": ">", "cal": "calibrate", "close": "close"}[act]
+            label = {"prev": "<", "next": ">", "cal": "calibrate", "close": "close", "refresh": "refresh"}[act]
             d.rectangle(rect, fill=line, outline=acc, width=1)
             d.text(((x0 + x1) // 2, (y0 + y1) // 2), label, font=_font(16, True), fill=fg, anchor="mm")
 
@@ -1049,7 +1087,7 @@ def draw_menu(img, menu, theme):
 # --------------------------------------------------------------------- plugin
 class ThemeManager(plugins.Plugin):
     __author__ = "theme_manager contributors"
-    __version__ = "2.0.0"
+    __version__ = "2.1.0"
     __license__ = "GPL3"
     __description__ = "Theme engine for the 3.5 inch display: colors, effects, animations, custom text, web GUI."
 
@@ -1068,6 +1106,10 @@ class ThemeManager(plugins.Plugin):
         self._menu_lock = threading.Lock()
         self._gps = None
         self._gps_wanted = 0
+        self._heat = 1.0
+        self._next_temp = 0
+        self._next_guard = 0
+        self._gps_waiting = None
         self._gps_evt = threading.Event()
         self._touch_m = None
         self._last_tap = None
@@ -1459,6 +1501,9 @@ class ThemeManager(plugins.Plugin):
                     menu["page"] = (menu["page"] - 1) % pages
                 elif act == "next":
                     menu["page"] = (menu["page"] + 1) % pages
+                elif act == "refresh":
+                    self.refresh_screen()
+                    return
                 elif act == "cal":
                     menu.update(mode="calib", step=0, raw=[])
                     menu["until"] = now + CALIB_TIMEOUT
@@ -1470,6 +1515,92 @@ class ThemeManager(plugins.Plugin):
         menu["confirm"] = None
         if not (16 <= x <= 464 and 8 <= y <= 312):   # a tap outside the panel closes it
             self.close_menu()
+
+    def refresh_screen(self):
+        """Force a full redraw: flash the panel black, forget what we think is on it (so every row is written again,
+        which clears a garbled or stuck display) and rebuild the UI frame."""
+        self._prev = None
+        self._full_at = 0
+        try:
+            with self._render_lock:
+                self._display._display.black_scr()
+        except Exception as e:
+            logging.debug("[theme_manager] refresh: %s", e)
+        try:
+            if self._view:
+                self._view.update(force=True)
+        except Exception as e:
+            logging.debug("[theme_manager] refresh: %s", e)
+        self._refresh_now()
+        logging.info("[theme_manager] screen refreshed from the touch menu")
+
+    # ---- guard: keep the Pi cool
+    def _guard_tick(self, now):
+        if now >= self._next_temp:
+            self._next_temp = now + 5
+            try:
+                temp = cpu_temp()
+            except (OSError, ValueError):
+                temp = None
+            if temp is not None:
+                new = heat_factor(temp, self._heat)
+                if new != self._heat:
+                    logging.warning("[theme_manager] CPU at %.0f C: animation %s", temp,
+                                    "paused" if new is None else "slowed down" if new > 1 else "back to normal")
+                    self._heat = new
+                    self._wake.set()
+        if now >= self._next_guard:
+            self._next_guard = now + GUARD_S
+            try:
+                self._check_gps()
+            except Exception as e:
+                logging.debug("[theme_manager] gps guard: %s", e)
+
+    def _gps_options(self):
+        try:
+            import pwnagotchi
+            opts = pwnagotchi.config["main"]["plugins"]["gps"]
+            return (opts["device"], opts.get("speed", 19200)) if opts.get("enabled") else None
+        except Exception:
+            return None
+
+    def _bettercap(self, *commands):
+        agent = getattr(self._view, "_agent", None)
+        if agent is None:
+            return False
+        for cmd in commands:
+            try:
+                agent.run(cmd)
+            except Exception:
+                if cmd != "gps off":          # "module gps is not running" is fine when switching it off
+                    raise
+        return True
+
+    def _reopen_gps(self, device, speed):
+        self._bettercap("gps off", "set gps.device %s" % device, "set gps.baudrate %s" % speed, "gps on")
+        self._gps_waiting = None
+        logging.info("[theme_manager] bettercap's GPS module reopened %s", device)
+
+    def _check_gps(self):
+        """A GPS receiver that is unplugged or renumbered leaves bettercap spinning on a dead file handle, using a whole
+        CPU core (and heating the Pi). Reset its GPS module, and bring it back when the device is there again."""
+        opts = self._gps_options()
+        if self._gps_waiting and opts and os.path.exists(opts[0]):
+            self._reopen_gps(*opts)
+            return
+        if self._gps_waiting:
+            return
+        stale = stale_tty_owner()
+        if not stale:
+            return
+        logging.warning("[theme_manager] bettercap holds a GPS device that no longer exists (%s): resetting its GPS module", stale[1])
+        if opts and os.path.exists(opts[0]):
+            self._reopen_gps(*opts)
+            return
+        self._bettercap("gps off")
+        if opts:
+            self._gps_waiting = True
+            logging.warning("[theme_manager] GPS device %s is not there: GPS stays off until it is plugged in again", opts[0])
 
     def _agent_mode(self):
         try:
@@ -1616,6 +1747,7 @@ class ThemeManager(plugins.Plugin):
             start = time.time()
             self._poll_files()
             self.menu_tick(start)
+            self._guard_tick(start)
             if start - self._last_trim > 20:
                 self._last_trim = start
                 trim_memory()
@@ -1623,7 +1755,10 @@ class ThemeManager(plugins.Plugin):
             busy = self._trans is not None or start < self._event_until + 0.3 or start < self._force[1] + 0.3
             m = self._menu
             live_menu = m is not None and m.get("tab") == "system" and m["mode"] == "list"
-            if self._ctx is None or not (busy or live_menu or self._face_multi or is_animated(theme)):
+            animate = busy or live_menu or self._face_multi or is_animated(theme)
+            if self._heat is None and not live_menu:      # too hot: only redraw when the UI itself changes
+                animate = False
+            if self._ctx is None or not animate:
                 self._wake.wait(0.5)
                 self._wake.clear()
                 continue
@@ -1639,6 +1774,7 @@ class ThemeManager(plugins.Plugin):
                 iv = min(iv, 0.1)
             if live_menu and not busy:
                 iv = min(iv, 1.0)
+            iv *= self._heat or 1.0
             time.sleep(min(1.0, max(0.03, iv - (time.time() - start))))
 
     # ---- hooks

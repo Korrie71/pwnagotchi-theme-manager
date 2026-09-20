@@ -1,5 +1,14 @@
 # Changelog
 
+## 2.1.0
+
+- **System tab: `refresh`.** Flashes the panel and writes the whole screen again, to clear a garbled or stuck display
+- **Thermal guard.** Animation runs at half rate above 75 C and pauses above 80 C, and resumes 3 degrees lower
+- **GPS watchdog.** If bettercap keeps a GPS device that no longer exists (unplugged, or renumbered `ttyACM0` to
+  `ttyACM1`) it spins a whole CPU core and heats the Pi. The plugin now notices, resets bettercap's GPS module and
+  brings it back when the device returns
+- Guide: use the stable `/dev/serial/by-id/...` name for a USB GPS receiver
+
 ## 2.0.0 - first public release
 
 **Themes**

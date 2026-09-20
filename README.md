@@ -34,7 +34,7 @@ with pwnagotchi's mood. Themes are small JSON files you can edit in a web editor
 - **Face packs:** replace the text face with PNG or GIF images per mood, in color or tinted by the theme
 - **Web editor** with live preview: sliders, gradient picker, drag-to-place text, click a part of the preview to recolor it, import/export
 - **Touch menu:** double tap the screen to switch themes, enable/disable pwnagotchi plugins on the fly, or see system status and restart/reboot/shut down
-- **Light:** only changed screen rows are sent to the display, static parts are cached, and animation backs off when the system is busy
+- **Light and cool:** only changed screen rows are sent to the display, static parts are cached, animation slows down when the Pi gets hot, and a watchdog resets bettercap's GPS module if it loses its device (which can burn a whole CPU core)
 
 ## Screenshots
 
@@ -125,7 +125,7 @@ $P mood sad 20           # preview a mood for 20 seconds
 |---|---|
 | **Themes** | switch theme with one tap |
 | **Plugins** | every installed plugin with an `ON`/`OFF` switch that takes effect immediately and is saved to `config.toml`; a plugin that fails to load shows `ERR` and is set back to disabled |
-| **System** | temperature, load, RAM, IP, GPS status, uptime, power state, handshake counts; `restart`, `reboot`, `shutdown` and AUTO/MANU mode buttons that each need a second tap to confirm |
+| **System** | temperature, load, RAM, IP, GPS status, uptime, power state, handshake counts; `restart`, `reboot`, `shutdown` and AUTO/MANU mode buttons that each need a second tap to confirm; `refresh` redraws the whole screen to clear a glitchy panel |
 
 `close`, a tap outside the menu, or 20 seconds of nothing closes it. It costs nothing while idle: one thread sleeps until
 the screen is touched.

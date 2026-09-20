@@ -151,6 +151,20 @@ tm._fill_status(tm._menu)
 lines = tm._menu["lines"]
 ok("it shows five status lines with real values", len(lines) == 5 and all("{" not in x for x in lines), lines)
 ok("there are no page buttons on it", not [r for r in T.menu_hits(tm._menu) if r[1][0] in ("prev", "next")])
+# ---- the refresh button
+updates = []
+tm._view.update = lambda force=False, new_data={}: updates.append(force)
+tm._prev = "pretend this is what is on the panel"
+n0 = tm.redraws[0]
+finger.tap_rect(finger.hit("refresh"))
+ok("refresh forgets what is on the panel, so every row gets written again", tm._prev is None and tm._full_at == 0)
+ok("refresh rebuilds the UI frame and redraws", updates == [True] and tm.redraws[0] > n0, (updates, tm.redraws[0] - n0))
+ok("refresh keeps the menu open on the System tab", tm._menu and tm._menu["tab"] == "system" and tm._menu["confirm"] is None)
+ok("refresh needs no confirmation and runs nothing dangerous", not recorded)
+finger.tap_rect(finger.hit("power", "reboot"))
+finger.tap_rect(finger.hit("refresh"))
+ok("refresh also cancels a pending power confirmation", tm._menu["confirm"] is None and not recorded)
+ok("the refresh button only exists on the System tab", not [r for r in T.menu_hits(dict(tm._menu, tab="themes")) if r[1][0] == "refresh"])
 finger.tap_rect(finger.hit("power", "restart"))
 ok("the first tap on a power button only asks to confirm", tm._menu and tm._menu["confirm"][0] == "restart" and not recorded)
 time.sleep(0.4)
