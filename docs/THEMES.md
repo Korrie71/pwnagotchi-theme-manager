@@ -110,9 +110,27 @@ Animated effects redraw the screen `fps` times per second. Themes without them o
 | `speed` | 40 | scroll speed, pixels per second |
 | `width` | 300 | scroll box width 10-480 |
 
-Placeholders: `{name}` (pwnagotchi name), `{time}` (HH:MM:SS), `{date}`, `{cpu}` (load %),
-`{temp}` (CPU temperature), `{mem}` (RAM used %), `{uptime}`. Unknown placeholders are printed as they are.
-Lines with `{time}`, `{cpu}`, `{temp}`, `{mem}`, `{uptime}` or `scroll` make the theme animated.
+Placeholders are replaced with live values (unknown ones are printed as they are):
+
+| placeholder | value |
+|---|---|
+| `{name}` | pwnagotchi name |
+| `{time}` `{date}` | `HH:MM:SS`, `YYYY-MM-DD` |
+| `{cpu}` `{temp}` `{mem}` `{uptime}` | load %, CPU temperature, RAM used %, uptime |
+| `{ip}` | IPv4 address of the connection that carries your default route (or the first interface with an address) |
+| `{mode}` | `AUTO` or `MANU` |
+| `{gps}` | `FIX 9sat`, `no fix`, or `n/a` when there is no GPS data |
+| `{lat}` `{lon}` `{sats}` | latitude and longitude (5 decimals, `-` without a fix), number of satellites |
+| `{handshakes}` | handshake files in the handshakes folder |
+| `{cracked}` | cracked passwords (lines in the `*.potfile` files in that folder) |
+| `{session}` | handshakes captured this session |
+| `{power}` | `OK` or `LOW` (the Pi's undervoltage flag) |
+| `{battery}` | battery percentage if the system reports one, else `n/a` |
+
+`{gps}`, `{lat}`, `{lon}` and `{sats}` need pwnagotchi's `gps` plugin (which turns on bettercap's GPS module).
+Values that are slow to read (`{ip}`, `{handshakes}`, `{cracked}`, `{battery}`) are cached for a few seconds, and a value
+is only read at all if a text line uses it. Lines with any live placeholder (everything except `{name}` and `{date}`) or
+`scroll` make the theme redraw once a second (or at `fps` for scrolling text).
 Use `{{` and `}}` for literal braces.
 
 ### Where is free space?
@@ -219,11 +237,19 @@ The first time, the menu asks for a quick **touch calibration**: tap the four `+
 controller reports raw numbers, so this teaches the plugin where your screen is. It only needs doing once and is saved in
 `/etc/pwnagotchi/themes/touch.json`. Use the `calibrate` button in the menu (or delete `touch.json`) to redo it.
 
-The menu has two tabs. **Themes** switches theme. **Plugins** lists every installed plugin with an `ON`/`OFF` switch: tap a
+The menu has three tabs. **Themes** switches theme. **Plugins** lists every installed plugin with an `ON`/`OFF` switch: tap a
 row to enable or disable that plugin right away, exactly like the switch on the web plugin page (the change is saved in
 `config.toml` and lasts after a reboot). While a plugin is switching the row shows `...`; enabling one can take a few
 seconds. `theme_manager` itself is never listed, so you can't switch off the menu from the menu. Pwnagotchi rewrites
 `config.toml` when a plugin is toggled; the plugin keeps your `personality.channels` line exactly as it was on disk.
+A plugin that cannot be loaded (for example because its file has an error) shows `ERR` and is set back to disabled.
+
+**System** shows CPU temperature and load, RAM, IP address, GPS status, uptime, power state, battery, and your handshake
+and cracked-password counts, refreshed every second. Below it are the buttons `Mode`, `restart`, `reboot` and
+`shutdown`. Each one asks for a **second tap** ("tap again", within 4 seconds) before it does anything, and any other
+tap cancels it. `restart` restarts pwnagotchi in the current mode, `Mode` restarts it in the other mode (AUTO or MANU),
+`reboot` and `shutdown` do what they say. They call the same pwnagotchi functions as the web UI's buttons, except that
+`restart` and `Mode` leave bettercap running, so the Wi-Fi driver is not reloaded.
 
 It costs nothing while idle: one small thread sleeps until the screen is touched. Menu and calibration screens are drawn
 with the active theme's colors, so custom themes get a matching menu automatically.

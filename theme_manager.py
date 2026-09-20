@@ -16,8 +16,11 @@ import math
 import os
 import random
 import contextlib
+import fcntl
+import glob
 import re
 import select
+import socket
 import struct
 import threading
 import time
@@ -65,7 +68,8 @@ KEY_RE = re.compile(r"^[A-Za-z0-9_.\-]{1,40}$")
 EFFECTS = {"scanlines", "vignette", "glow", "noise", "pulse", "rainbow",
            "glitch", "rain", "stars", "border"}
 ANIMATED = {"pulse", "rainbow", "glitch", "rain", "stars", "noise"}
-LIVE_TOKENS = ("{time}", "{cpu}", "{temp}", "{mem}", "{uptime}")
+LIVE_TOKENS = ("{time}", "{cpu}", "{temp}", "{mem}", "{uptime}", "{ip}", "{gps}", "{lat}", "{lon}", "{sats}",
+               "{handshakes}", "{cracked}", "{session}", "{battery}", "{power}", "{mode}")
 NUM_LIMITS = {"strength": (0, 1), "speed": (0, 30), "size": (1, 64), "density": (0.01, 1),
               "radius": (0, 12), "interval": (0.5, 60)}
 TEXT_MAX = 20
@@ -390,18 +394,122 @@ def _sysstats():
     return v
 
 
-class _Safe(dict):
+_slow = {}
+STAT_SOURCE = None    # set by the plugin: values that need pwnagotchi's live state (GPS fix, mode, session count)
+
+
+def _cached(key, ttl, fn):
+    now = time.time()
+    hit = _slow.get(key)
+    if hit and now - hit[0] < ttl:
+        return hit[1]
+    try:
+        val = fn()
+    except Exception:
+        val = "?"
+    _slow[key] = (now, val)
+    return val
+
+
+def _iface_ip(name):
+    with socket.socket(socket.AF_INET, socket.SOCK_DGRAM) as sk:
+        try:
+            return socket.inet_ntoa(fcntl.ioctl(sk.fileno(), 0x8915, struct.pack("256s", name[:15].encode()))[20:24])
+        except OSError:
+            return None
+
+
+def _local_ip():
+    """IPv4 of the interface that carries the default route, else the first interface that has an address."""
+    first = []
+    try:
+        for line in open("/proc/net/route").read().splitlines()[1:]:
+            f = line.split()
+            if f[1] == "00000000":
+                first.append(f[0])
+    except OSError:
+        pass
+    for name in first + sorted(os.listdir("/sys/class/net")):
+        if name != "lo" and not name.endswith("mon"):
+            ip = _iface_ip(name)
+            if ip:
+                return ip
+    return "no ip"
+
+
+def _handshake_dir():
+    try:
+        import pwnagotchi
+        return pwnagotchi.config["bettercap"]["handshakes"]
+    except Exception:
+        return "/etc/pwnagotchi/handshakes"
+
+
+def _count_handshakes():
+    with os.scandir(_handshake_dir()) as it:
+        return str(sum(1 for e in it if e.name.endswith((".pcap", ".pcapng"))))
+
+
+def _count_cracked():
+    d, n = _handshake_dir(), 0
+    for f in os.listdir(d):
+        if f.endswith(".potfile"):
+            with open(os.path.join(d, f), errors="ignore") as fp:
+                n += sum(1 for line in fp if line.strip())
+    return str(n)
+
+
+def _power_state():
+    """OK / LOW from the Pi's undervoltage flag."""
+    for h in glob.glob("/sys/class/hwmon/hwmon*"):
+        try:
+            if open(h + "/name").read().strip() == "rpi_volt":
+                return "LOW" if open(h + "/in0_lcrit_alarm").read().strip() == "1" else "OK"
+        except OSError:
+            continue
+    return "n/a"
+
+
+def _battery():
+    for d in sorted(glob.glob("/sys/class/power_supply/*")):
+        try:
+            if open(d + "/type").read().strip() == "Mains":
+                continue
+            return "%d%%" % int(open(d + "/capacity").read())
+        except (OSError, ValueError):
+            continue
+    return "n/a"
+
+
+PROVIDERS = {"ip": (15, _local_ip), "handshakes": (15, _count_handshakes), "cracked": (15, _count_cracked),
+             "power": (2, _power_state), "battery": (10, _battery)}
+
+
+class _Lazy(dict):
+    """format_map source that only reads a value when the text asks for it."""
     def __missing__(self, key):
+        if key in ("name", "cpu", "temp", "mem", "uptime"):
+            return _sysstats().get(key, "?")
+        if key == "time":
+            return time.strftime("%H:%M:%S")
+        if key == "date":
+            return time.strftime("%Y-%m-%d")
+        if key in PROVIDERS:
+            ttl, fn = PROVIDERS[key]
+            return _cached(key, ttl, fn)
+        if STAT_SOURCE is not None:
+            try:
+                v = STAT_SOURCE(key)
+            except Exception:
+                v = "?"
+            if v is not None:
+                return v
         return "{%s}" % key
 
 
 def _expand(text):
-    v = dict(_sysstats())
-    lt = time.localtime()
-    v["time"] = time.strftime("%H:%M:%S", lt)
-    v["date"] = time.strftime("%Y-%m-%d", lt)
     try:
-        return text.format_map(_Safe(v))
+        return text.format_map(_Lazy())
     except Exception:
         return text
 
@@ -789,6 +897,11 @@ MENU_TIMEOUT = 20.0
 CALIB_TIMEOUT = 60.0
 CALIB_POINTS = ((40, 40), (440, 40), (40, 280), (440, 280))
 MENU_ROWS = 5
+CONFIRM_S = 4.0          # a power button must be tapped twice within this time
+GPS_TOKENS = ("gps", "lat", "lon", "sats")
+STATUS_LINES = ("CPU {temp}  load {cpu}  RAM {mem}", "IP {ip}", "GPS {gps}  {lat} {lon}",
+                "Up {uptime}  Power {power}  Bat {battery}", "Pwned {handshakes}  Cracked {cracked}  Session {session}")
+TABS = (("themes", (28, 10, 138, 38)), ("plugins", (144, 10, 254, 38)), ("system", (260, 10, 370, 38)))
 PROTECTED_PLUGINS = ('theme_manager',)   # never listed: switching it off would remove the menu itself
 
 
@@ -855,13 +968,16 @@ def menu_items(menu):
 
 def menu_hits(menu):
     """[(rect, (action, arg))] for the current menu page, in upright screen pixels."""
-    items, page, tab = menu_items(menu), menu["page"], menu.get("tab", "themes")
+    tab, page = menu.get("tab", "themes"), menu["page"]
+    tabs = [(rect, ("tab", name)) for name, rect in TABS]
+    common = [((220, 268, 320, 308), ("cal", None)), ((380, 268, 452, 308), ("close", None))] + tabs
+    if tab == "system":
+        return [((28, 166, 452, 200), ("mode", None)), ((28, 208, 152, 248), ("power", "restart")),
+                ((158, 208, 282, 248), ("power", "reboot")), ((288, 208, 412, 248), ("power", "shutdown"))] + common
     act = "pick" if tab == "themes" else "toggle"
     hits = [((28, 44 + i * 44, 452, 44 + i * 44 + 40), (act, n))
-            for i, n in enumerate(items[page * MENU_ROWS:(page + 1) * MENU_ROWS])]
-    return hits + [((28, 268, 118, 308), ("prev", None)), ((124, 268, 214, 308), ("next", None)),
-                   ((220, 268, 320, 308), ("cal", None)), ((380, 268, 452, 308), ("close", None)),
-                   ((28, 10, 138, 38), ("tab", "themes")), ((144, 10, 254, 38), ("tab", "plugins"))]
+            for i, n in enumerate(menu_items(menu)[page * MENU_ROWS:(page + 1) * MENU_ROWS])]
+    return hits + [((28, 268, 118, 308), ("prev", None)), ((124, 268, 214, 308), ("next", None))] + common
 
 
 def _mixc(a, b, k):
@@ -887,10 +1003,24 @@ def draw_menu(img, menu, theme):
         return
     tab, page = menu.get("tab", "themes"), menu["page"]
     pages = max(1, -(-len(menu_items(menu)) // MENU_ROWS))
-    d.text((452, 16), "%d/%d" % (page + 1, pages), font=_font(14), fill=fg, anchor="ra")
+    if tab != "system":
+        d.text((452, 16), "%d/%d" % (page + 1, pages), font=_font(14), fill=fg, anchor="ra")
+    else:
+        for i, text in enumerate(menu.get("lines", ())):
+            d.text((32, 46 + i * 24), text, font=_font(16), fill=fg)
     for rect, (act, arg) in menu_hits(menu):
         x0, y0, x1, y1 = rect
-        if act == "tab":
+        if act in ("mode", "power"):
+            key = "mode" if act == "mode" else arg
+            ask = bool(menu.get("confirm")) and menu["confirm"][0] == key
+            other = "AUTO" if menu.get("mode_now") == "MANU" else "MANU"
+            if act == "mode":
+                label = "tap again: restart in %s" % other if ask else "Mode: %s  (tap to switch)" % menu.get("mode_now", "?")
+            else:
+                label = "tap again" if ask else arg
+            d.rounded_rectangle(rect, 8, fill=acc if ask else line, outline=acc, width=2)
+            d.text(((x0 + x1) // 2, (y0 + y1) // 2), label, font=_font(16, True), fill=bg if ask else fg, anchor="mm")
+        elif act == "tab":
             on = arg == tab
             d.rectangle(rect, fill=acc if on else line, outline=acc, width=1)
             d.text(((x0 + x1) // 2, (y0 + y1) // 2), arg.capitalize(), font=_font(16, True),
@@ -936,6 +1066,9 @@ class ThemeManager(plugins.Plugin):
         self._wake = threading.Event()
         self._menu = None
         self._menu_lock = threading.Lock()
+        self._gps = None
+        self._gps_wanted = 0
+        self._gps_evt = threading.Event()
         self._touch_m = None
         self._last_tap = None
         self._down = None
@@ -1175,6 +1308,8 @@ class ThemeManager(plugins.Plugin):
         img = colorize(ctx["canvas"], theme, t, ctx["layers"], self._face_frame(theme, t))
         menu = self._menu
         if menu is not None:
+            if menu.get("tab") == "system" and menu["mode"] == "list":
+                self._fill_status(menu)
             draw_menu(img, menu, self._theme)
         return rotate(img, self._rot)
 
@@ -1236,8 +1371,8 @@ class ThemeManager(plugins.Plugin):
             mode = "list" if self._touch_m else "calib"
         themes = self._all()
         with self._menu_lock:
-            self._menu = {"mode": mode, "tab": tab if tab in ("themes", "plugins") else "themes", "page": 0,
-                          "pages": {"themes": 0, "plugins": 0}, "plugins": self._plugin_names(),
+            self._menu = {"mode": mode, "tab": tab if tab in ("themes", "plugins", "system") else "themes", "page": 0,
+                          "pages": {"themes": 0, "plugins": 0, "system": 0}, "confirm": None, "plugins": self._plugin_names(),
                           "on": set(plugins.loaded), "busy": set(), "failed": set(), "step": 0, "raw": [], "names": list(themes),
                           "colors": {n: t for n, t in themes.items()}, "active": self._active,
                           "until": now + (CALIB_TIMEOUT if mode == "calib" else MENU_TIMEOUT)}
@@ -1253,6 +1388,9 @@ class ThemeManager(plugins.Plugin):
         m = self._menu
         if m is not None and now > m["until"]:
             self.close_menu()
+        elif m is not None and m.get("confirm") and now > m["confirm"][1]:
+            m["confirm"] = None
+            self._refresh_now()
 
     def on_tap(self, rx, ry, now):
         """A finished tap at raw touch coordinates."""
@@ -1292,10 +1430,20 @@ class ThemeManager(plugins.Plugin):
         for (x0, y0, x1, y1), (act, arg) in menu_hits(menu):
             if x0 <= x <= x1 and y0 <= y <= y1:
                 pages = max(1, -(-len(menu_items(menu)) // MENU_ROWS))
+                if act not in ("power", "mode"):
+                    menu["confirm"] = None
                 if act == "tab":
                     menu["pages"][menu["tab"]] = menu["page"]
                     menu["tab"] = arg
                     menu["page"] = menu["pages"][arg]
+                elif act in ("power", "mode"):
+                    key = "mode" if act == "mode" else arg
+                    ask = menu.get("confirm")
+                    if ask and ask[0] == key and now <= ask[1]:
+                        menu["confirm"] = None
+                        self._do_system(key)
+                        return
+                    menu["confirm"] = (key, now + CONFIRM_S)
                 elif act == "toggle":
                     if arg not in menu["busy"]:
                         menu["busy"].add(arg)
@@ -1319,8 +1467,75 @@ class ThemeManager(plugins.Plugin):
                     return
                 self._refresh_now()
                 return
+        menu["confirm"] = None
         if not (16 <= x <= 464 and 8 <= y <= 312):   # a tap outside the panel closes it
             self.close_menu()
+
+    def _agent_mode(self):
+        try:
+            return "MANU" if self._view._agent.mode == "manual" else "AUTO"
+        except Exception:
+            return "AUTO"
+
+    def _fill_status(self, menu):
+        menu["lines"] = [_expand(t) for t in STATUS_LINES]
+        menu["mode_now"] = self._agent_mode()
+
+    def _do_system(self, key):
+        """restart / reboot / shutdown / switch mode: the same pwnagotchi calls the web UI makes, run off the touch thread."""
+        import pwnagotchi
+        mode = self._agent_mode()
+        # restart_bettercap=False: restarting only pwnagotchi is enough, and bettercap's restart reloads the Wi-Fi driver
+        actions = {"restart": (pwnagotchi.restart, (mode, False)), "reboot": (pwnagotchi.reboot, ()),
+                   "shutdown": (pwnagotchi.shutdown, ()),
+                   "mode": (pwnagotchi.restart, ("AUTO" if mode == "MANU" else "MANU", False))}
+        fn, args = actions[key]
+        logging.warning("[theme_manager] touch menu: %s%s", key, " -> " + args[0] if args else "")
+        self.close_menu()
+        threading.Thread(target=fn, args=args, daemon=True, name="theme-system").start()
+
+    def _live_stat(self, key):
+        """Placeholder values that need pwnagotchi's live state (see _Lazy)."""
+        if key in GPS_TOKENS:
+            now = time.time()
+            if now - self._gps_wanted > 30:
+                self._gps_evt.set()          # nobody asked for a while: refresh right away
+            self._gps_wanted = now
+            g = self._gps
+            if g is None:
+                return {"gps": "n/a"}.get(key, "-")
+            try:
+                lat, lon = float(g.get("Latitude") or 0), float(g.get("Longitude") or 0)
+            except (TypeError, ValueError):
+                lat = lon = 0.0
+            try:
+                sats = int(g.get("NumSatellites") or 0)
+            except (TypeError, ValueError):
+                sats = 0
+            fix = bool(lat or lon) and str(g.get("FixQuality", "1")) not in ("0", "")
+            if key == "gps":
+                return "FIX %dsat" % sats if fix else "no fix"
+            if key == "sats":
+                return str(sats)
+            return "%.5f" % (lat if key == "lat" else lon) if fix else "-"
+        if key == "session":
+            m = re.match(r"\s*(\d+)", str(self._view.get("shakes") or "")) if self._view else None
+            return m.group(1) if m else "0"
+        if key == "mode":
+            return self._agent_mode()
+        return None
+
+    def _gps_loop(self):
+        while self._running:
+            if time.time() - self._gps_wanted < 60:
+                try:
+                    sess = self._view._agent.session()
+                    self._gps = sess.get("gps") if isinstance(sess, dict) else None
+                except Exception:
+                    self._gps = None
+                    self._gps_evt.wait(25)
+            self._gps_evt.wait(5)
+            self._gps_evt.clear()
 
     def _forget_enabled(self, name):
         """toggle_plugin marks a plugin enabled before loading it. If it could not load, don't leave that in config.toml."""
@@ -1406,7 +1621,9 @@ class ThemeManager(plugins.Plugin):
                 trim_memory()
             theme = self._current(start)
             busy = self._trans is not None or start < self._event_until + 0.3 or start < self._force[1] + 0.3
-            if self._ctx is None or not (busy or self._face_multi or is_animated(theme)):
+            m = self._menu
+            live_menu = m is not None and m.get("tab") == "system" and m["mode"] == "list"
+            if self._ctx is None or not (busy or live_menu or self._face_multi or is_animated(theme)):
                 self._wake.wait(0.5)
                 self._wake.clear()
                 continue
@@ -1420,6 +1637,8 @@ class ThemeManager(plugins.Plugin):
             iv = 0.05 if busy else frame_interval(theme, start)
             if self._face_multi and not busy:
                 iv = min(iv, 0.1)
+            if live_menu and not busy:
+                iv = min(iv, 1.0)
             time.sleep(min(1.0, max(0.03, iv - (time.time() - start))))
 
     # ---- hooks
@@ -1506,6 +1725,9 @@ class ThemeManager(plugins.Plugin):
         self._apply_faces(self._theme)
         self._running = True
         threading.Thread(target=self._anim_loop, daemon=True, name="theme-anim").start()
+        global STAT_SOURCE
+        STAT_SOURCE = self._live_stat
+        threading.Thread(target=self._gps_loop, daemon=True, name="theme-gps").start()
         dev = find_touch_device()
         if dev:
             self._load_touch()
@@ -1760,7 +1982,7 @@ const FX={glow:{radius:[0,12,1,3],strength:[0,1,.05,.8]},scanlines:{strength:[0,
  stars:{density:[.05,1,.05,.5],speed:[0,30,.5,3],color:1}};
 const ANIM=['pulse','rainbow','glitch','rain','stars','noise'];
 const MOODS=['look_r','sleep','awake','bored','intense','cool','happy','grateful','excited','motivated','demotivated','smart','lonely','sad','angry','friend','broken','debug','upload','handshake'];
-const HOLDERS=['{name}','{time}','{date}','{cpu}','{temp}','{mem}','{uptime}'];
+const HOLDERS=['{name}','{time}','{date}','{cpu}','{temp}','{mem}','{uptime}','{ip}','{mode}','{gps}','{lat}','{lon}','{sats}','{handshakes}','{cracked}','{session}','{power}','{battery}'];
 const TABS=['Colors','Effects','Text','Elements','Moods','Faces','JSON'];
 let S={active:'',themes:{}},sel='',cur={},info={elements:[],entities:[],packs:{}},tab='Colors',mood='sad',pvMood=null,busy=false,dirty=false,pvErr=false,timer=null;
 const say=t=>$('msg').textContent=t||'';
@@ -1781,7 +2003,7 @@ const canon=v=>Array.isArray(v)?v.map(canon):(v&&typeof v==='object')?Object.fro
 const strip=o=>{const c=clone(o);delete c.builtin;return canon(prune(c))};
 const same=(a,b)=>JSON.stringify(strip(a))===JSON.stringify(strip(b));
 function animated(){const fx=(cur.effects||[]).some(e=>ANIM.includes(e.type));
- const tx=(cur.text||[]).some(l=>l.scroll||/\{(time|cpu|temp|mem|uptime)\}/.test(l.text||''));
+ const tx=(cur.text||[]).some(l=>l.scroll||/\{(time|cpu|temp|mem|uptime|ip|mode|gps|lat|lon|sats|handshakes|cracked|session|power|battery)\}/.test(l.text||''));
  return fx||tx||!!cur.face_pack||Object.values(cur.elements||{}).includes('rainbow')||Object.keys(cur.mood||{}).length>0}
 
 /* ---- preview ---- */
@@ -1821,7 +2043,9 @@ const entBox=k=>{const e=info.entities.find(e=>e.key===k);return e?e.box:null};
 function entityRow(k,getObj,src){const v=(getObj(false)||{})[k];const eff=v&&v!=='rainbow'?v:inheritColor(k,entBox(k),src);
  const again=()=>{panel();if(pickKey)showPick(pickKey)};
  const row=E('div',{class:'erow'+(v!==undefined?' set':''),'data-key':k},E('span',{class:'ename',title:k},k),
-  colorIn(eff,c=>{getObj(true)[k]=c;row.classList.add('set');touch()}),
+  colorIn(eff,c=>{getObj(true)[k]=c;
+   document.querySelectorAll('.erow[data-key="'+k+'"]').forEach(r=>{r.classList.add('set');const ci=r.querySelector('input[type=color]');if(ci&&ci.value!==c)ci.value=c;const h=r.querySelector('.inh');if(h)h.remove()});
+   touch()}),
   check('rainbow',v==='rainbow',on=>{getObj(true)[k]=on?'rainbow':eff;touch();again()}),
   E('button',{class:'x',title:'back to the theme color',onclick:()=>{delete getObj(true)[k];touch();again()}},'reset'),
   v===undefined?E('span',{class:'inh'},'theme color'):null);

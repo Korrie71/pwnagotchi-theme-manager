@@ -3,17 +3,46 @@
 A theme engine for [pwnagotchi](https://pwnagotchi.org) on a **3.5" framebuffer LCD** (`waveshare35lcd`, 480x320).
 Pwnagotchi draws in black and white; this plugin turns that into full-color themes, live.
 
+![Some of the built-in themes](docs/images/themes.png)
+
 ## Features
 
 - **Colors and gradients** for ink, background and the top/bottom bars
 - **Effects:** glow, scanlines, vignette, film grain, pulse, rainbow, glitch, matrix rain, twinkling stars, border
 - **Per-element colors:** face, name, status, stats and any plugin's on-screen items each get their own color
-- **Custom text lines** with placeholders (`{name}`, `{time}`, `{cpu}`, `{temp}`...) and scrolling marquees
+- **Custom text lines** with live placeholders (`{time}`, `{cpu}`, `{temp}`, `{ip}`, `{gps}`, `{handshakes}`, `{cracked}`, `{power}`...) and scrolling marquees
 - **Mood-reactive themes:** colors and effects follow pwnagotchi's face (sad, angry, happy...), with smooth blending and a flash on new handshakes
 - **Face packs:** replace the text face with PNG or GIF images per mood, in color or tinted by the theme
 - **Web editor** with live preview: sliders, gradient picker, drag-to-place text, click a part of the preview to recolor it, import/export
-- **Touch menu:** double tap the screen to switch themes, or to enable/disable pwnagotchi plugins on the fly
+- **Touch menu:** double tap the screen to switch themes, enable/disable pwnagotchi plugins on the fly, or see system status and restart/reboot/shut down
 - Themes are small JSON files you can share
+
+## Screenshots
+
+Everything below is rendered from made-up data (a fake name, fake stats), by the plugin's own drawing code.
+
+**Mood-reactive themes** change colors and effects with pwnagotchi's face:
+
+![One theme in six moods](docs/images/moods.png)
+
+**Face packs** replace the text face with images, in color or tinted by the theme:
+
+![Two face packs](docs/images/faces.png)
+
+**Touch menu** (double tap the screen): themes, plugins and system:
+
+<p>
+<img src="docs/images/menu-themes.png" width="32%" alt="Themes tab">
+<img src="docs/images/menu-plugins.png" width="32%" alt="Plugins tab">
+<img src="docs/images/menu-system.png" width="32%" alt="System tab">
+</p>
+
+**Web editor** with a live preview: drag text lines on the preview, or click a part of the screen to recolor it.
+
+<p>
+<img src="docs/images/editor-text.png" width="49%" alt="Editor, text tab">
+<img src="docs/images/editor-entities.png" width="49%" alt="Editor, element colors">
+</p>
 
 ## Requirements
 
@@ -57,7 +86,9 @@ $P mood sad 20           # preview a mood for 20 seconds
 **Touch menu:** double tap the screen (two quick taps in about the same place). The first time you are asked to tap four
 `+` marks in the corners to calibrate. Then the **Themes** tab switches theme with one tap, and the **Plugins** tab lists every
 installed plugin with an `ON`/`OFF` switch that takes effect immediately and is saved to `config.toml`. A plugin that
-fails to load shows `ERR` and is set back to disabled. `close`, a tap outside the menu, or 20 seconds of nothing closes it.
+fails to load shows `ERR` and is set back to disabled. The **System** tab shows temperature, load, RAM, IP, GPS status,
+uptime, power state and handshake counts, and has `restart`, `reboot`, `shutdown` and AUTO/MANU mode buttons that each
+need a second tap to confirm. `close`, a tap outside the menu, or 20 seconds of nothing closes it.
 It costs nothing while idle: one thread sleeps until the screen is touched.
 
 The full guide to writing themes (every field, effect, placeholder and mood) is in [docs/THEMES.md](docs/THEMES.md).
@@ -76,6 +107,7 @@ framebuffer, static parts are cached, and animation slows down when the system i
 - Pwnagotchi rewrites `config.toml` from memory when a plugin is toggled. The touch menu keeps `personality.channels` exactly as
   it is on disk; toggling from the web plugin page does not, so check that line if you rely on `channels = []`.
 - The web accent color of pwnagotchi's own UI follows the active theme.
+- The GPS placeholders (`{gps}`, `{lat}`, `{lon}`, `{sats}`) need pwnagotchi's `gps` plugin, which enables bettercap's GPS module.
 
 ## License
 
