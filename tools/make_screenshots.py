@@ -41,6 +41,11 @@ moods = [("happy", faces.HAPPY), ("excited", faces.EXCITED), ("sad", faces.SAD),
          ("lonely", faces.LONELY), ("cool", faces.COOL)]
 grid([(render("moody", face, mood=m), "mood: " + m) for m, face in moods], 3, (360, 240)).save(os.path.join(OUT, "moods.png"), optimize=True)
 
+# ---- more themes
+more = ["startrek", "spring", "summer", "autumn", "winter", "mountain", "ocean", "forest", "desert", "aurora", "volcano", "halloween",
+        "christmas", "space"]
+grid([(render(n), n) for n in more], 4, (360, 240)).save(os.path.join(OUT, "themes-more.png"), optimize=True)
+
 # ---- face packs
 packs = [("blobby", faces.HAPPY, "blob: happy"), ("blobby", faces.SAD, "blob: sad"), ("blobby", faces.ANGRY, "blob: angry"),
          ("blobby", faces.COOL, "blob: cool"), ("sketch", faces.HAPPY, "outline (tinted): happy"),
@@ -57,8 +62,20 @@ menu = {"mode": "list", "tab": "themes", "page": 0, "pages": {}, "names": list(t
         "busy": set(), "failed": set(), "confirm": None,
         "lines": ["CPU 48C  load 12%  RAM 21%", "IP 192.0.2.42", "GPS FIX 9sat  48.85837 2.29448",
                   "Up 03:12:45  Power OK  Bat n/a", "Pwned 27  Cracked 3  Session 4"], "mode_now": "AUTO"}
+# achievements with made-up progress, and the elements a layout list would show
+fake = {"handshakes": 27, "cracked": 3, "hours": 12.5, "days": 4, "themes": 6}
+done = {"first_shake", "shakes_10", "cracked_1", "uptime_1", "days_3", "swiper"}
+award_info = {}
+for aid, aname, desc, stat, goal in T.ACHIEVEMENTS:
+    award_info[aid] = {"id": aid, "name": aname, "desc": desc, "goal": goal, "unlocked": 1.0 if aid in done else None,
+                       "progress": fake.get(stat, 0)}
+elements = ["aps", "channel", "face", "line1", "line2", "mode", "name", "shakes", "status", "uptime"]
+menu.update(awards=[a[0] for a in T.ACHIEVEMENTS], award_info=award_info, awards_on=True, layout=elements,
+            layout_info={"face": (12, 6), "name": (0, -4)}, overheat=False)
 for name, extra in (("menu-themes.png", {"tab": "themes", "page": 1}), ("menu-plugins.png", {"tab": "plugins", "busy": {"bt-tether"}}),
-                    ("menu-system.png", {"tab": "system"})):
+                    ("menu-system.png", {"tab": "system", "overheat": True}), ("menu-awards.png", {"tab": "awards"}),
+                    ("menu-layout.png", {"tab": "layout", "page": 1}),
+                    ("menu-adjust.png", {"mode": "adjust", "adjust": "face", "offset": (12, 6), "box": (25, 52, 252, 122), "step_px": 5})):
     render("cyberpunk", menu=dict(menu, **extra)).save(os.path.join(OUT, name), optimize=True)
 
 print("wrote", ", ".join(sorted(f for f in os.listdir(OUT) if f.endswith(".png") and not f.startswith("editor"))))

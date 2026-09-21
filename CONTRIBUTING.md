@@ -27,7 +27,7 @@ Open an issue with the "Bug report" template. The most useful things are what yo
 ## Change the code
 
 ```bash
-pip install numpy pillow
+pip install numpy pillow flask     # flask is optional: it only enables the web API test
 python tests/run_all.py
 ```
 

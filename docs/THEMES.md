@@ -18,8 +18,10 @@ sudo /opt/.pwn/bin/python3 /etc/pwnagotchi/custom-plugins/theme_manager.py set m
 
 The file name (without `.json`) is the theme name: letters, digits, `_`, `-` and spaces, max 32.
 Saved files are picked up live. If you edit the active theme's file, re-apply it (or save it from the web page).
-Built-in theme names (default, paper, matrix, amber, cyberpunk, vaporwave, blood, ice, gameboy, rainbow)
-can't be saved over or deleted, but you can copy them under a new name.
+Built-in theme names can't be saved over or deleted, but you can copy them under a new name. They are `default`, `paper`,
+`matrix`, `amber`, `cyberpunk`, `vaporwave`, `blood`, `ice`, `gameboy`, `rainbow`, and the newer ones: `startrek`
+(a bridge console with a stardate), the seasons `spring`, `summer`, `autumn` and `winter`, the landscapes `mountain`,
+`ocean`, `forest`, `desert`, `aurora` and `volcano`, and `halloween`, `christmas` and `space`.
 
 ## How it works (read this once)
 
@@ -126,6 +128,7 @@ Placeholders are replaced with live values (unknown ones are printed as they are
 | `{session}` | handshakes captured this session |
 | `{power}` | `OK` or `LOW` (the Pi's undervoltage flag) |
 | `{battery}` | battery percentage if the system reports one, else `n/a` |
+| `{stardate}` | a made-up stardate from the calendar, like `26264.4` |
 
 `{gps}`, `{lat}`, `{lon}` and `{sats}` need pwnagotchi's `gps` plugin (which turns on bettercap's GPS module).
 Values that are slow to read (`{ip}`, `{handshakes}`, `{cracked}`, `{battery}`) are cached for a few seconds, and a value
@@ -249,7 +252,7 @@ The first time, the menu asks for a quick **touch calibration**: tap the four `+
 controller reports raw numbers, so this teaches the plugin where your screen is. It only needs doing once and is saved in
 `/etc/pwnagotchi/themes/touch.json`. Use the `calibrate` button in the menu (or delete `touch.json`) to redo it.
 
-The menu has three tabs. **Themes** switches theme. **Plugins** lists every installed plugin with an `ON`/`OFF` switch: tap a
+The menu has five tabs. **Themes** switches theme. **Plugins** lists every installed plugin with an `ON`/`OFF` switch: tap a
 row to enable or disable that plugin right away, exactly like the switch on the web plugin page (the change is saved in
 `config.toml` and lasts after a reboot). While a plugin is switching the row shows `...`; enabling one can take a few
 seconds. `theme_manager` itself is never listed, so you can't switch off the menu from the menu. Pwnagotchi rewrites
@@ -263,9 +266,16 @@ tap cancels it. `restart` restarts pwnagotchi in the current mode, `Mode` restar
 `reboot` and `shutdown` do what they say. They call the same pwnagotchi functions as the web UI's buttons, except that
 `restart` and `Mode` leave bettercap running, so the Wi-Fi driver is not reloaded.
 
+`Hot-off` switches the overheating auto-off on and off (see "Keeping it cool").
+
 `refresh` needs no confirmation: it flashes the panel black and writes the whole screen again. Use it when the display
 looks garbled or stuck (the plugin normally sends only the rows that changed, so a glitch on the panel can otherwise
 stay until that spot changes). `dim` cycles the brightness 100% / 60% / 30% (see "Brightness and night mode").
+
+**Awards** lists the achievements (see "Achievements"): a star and `done` for the ones you have, `n/goal` for the rest.
+Tap a row to see what it asks for.
+
+**Layout** lists everything on the screen so you can move it (see "Moving things on the screen").
 
 **Swipe:** on the bare screen (no menu open), swipe sideways to change theme: left goes to the next theme, right to the
 previous one, and the new theme's name shows for a moment. It needs the calibration, and only clearly sideways swipes
@@ -277,6 +287,30 @@ with the active theme's colors, so custom themes get a matching menu automatical
 If nothing happens, check `journalctl`-style output in `/etc/pwnagotchi/log/pwnagotchi.log` for `theme_manager`:
 `touch menu ready on /dev/input/eventN` means the touch reader is running, `double tap: opening the theme menu` means
 the gesture was recognised. No touchscreen found means the menu is simply disabled.
+
+## Moving things on the screen
+
+Every element pwnagotchi draws (the face, the name, the status text, the counters, the lines, and the items other plugins
+add) can be moved. On the device: double tap, open the **Layout** tab, tap an element and a box appears around it with a
+small popup: `X -` `X +` `Y -` `Y +` move it one step, `step` cycles 1, 5 and 10 pixels, `reset` puts that element back and
+`done` returns to the list. Taps outside the popup do nothing, so the element stays in view while you place it. `clear`
+on the list puts everything back (it asks for a second tap). In the web editor, the **Layout** tab does the same with
+buttons.
+
+Moves are saved in `/etc/pwnagotchi/themes/layout.json`, apply to every theme, and are limited to 200 pixels. The
+element is drawn at the new spot, so its colors, glow and effects go with it. Pwnagotchi's own layout is never changed.
+`theme_manager.py layout show` prints what is moved and `layout reset` puts it all back.
+
+## Achievements
+
+A small set of achievements to unlock: handshakes captured (1, 10, 50, 100, 500), passwords cracked, hours of running
+time, different days used, themes tried, running at 3 in the morning, swiping to change theme, moving something on the
+screen, the heat guard stepping in, uploading a face, and downloading a backup. A message shows on the screen when
+one unlocks. The **Awards** tab of the touch menu and of the web editor show them all with their progress.
+
+Progress is kept in `/etc/pwnagotchi/themes/achievements.json`. The first time, it starts from the handshakes and
+cracked passwords already on the device (those unlock without a message). Switch it all off in the web editor
+(Settings tab) or with `theme_manager.py achievements off`: nothing is counted or written then.
 
 ## Brightness and night mode
 
@@ -303,7 +337,7 @@ with `"warnings": false`.
 
 ## Keeping it cool
 
-The plugin protects the Pi from overheating in two ways, with nothing to configure:
+The plugin protects the Pi from overheating in two ways, with nothing to configure, and can optionally shut it down:
 
 - **Thermal guard.** Above 75 C the animation runs at half rate, and above 80 C it pauses (the screen still redraws
   whenever pwnagotchi itself changes something). It resumes 3 degrees below where it slowed down, so it does not flap.
@@ -315,6 +349,13 @@ The plugin protects the Pi from overheating in two ways, with nothing to configu
 
 To make the name stable in the first place, point the `gps` plugin at the `/dev/serial/by-id/...` path instead of
 `/dev/ttyACM0` (`ls /dev/serial/by-id/` shows it). It always leads to the same receiver, whatever number it gets.
+
+- **Auto-off (optional, off by default).** If the Pi stays above a temperature for a while, it shuts itself down to protect
+  the hardware. Turn it on with the `Hot-off` button on the System tab, in the Settings tab of the web editor, or with
+  `theme_manager.py overheat on 85 60` (off at 85 C after 60 seconds; the temperature can be 70-95 C and the time 10-600
+  seconds). It only acts when the temperature has stayed at or above the limit for the whole time you set. Then the
+  screen shows **TOO HOT: OFF IN nn s (touch to cancel)**, counting down from 30 seconds. A touch cancels it (it then stays
+  quiet for 10 minutes), and so does the Pi cooling down 3 degrees below the limit.
 
 If the Pi still runs hot, the biggest help is hardware: an active cooler or a fan on the Pi 5's fan connector.
 `{temp}` on a text line, or the System tab, shows the temperature.

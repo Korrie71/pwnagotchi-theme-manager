@@ -10,6 +10,9 @@ CLI (run with /opt/.pwn/bin/python3):
   theme_manager.py dim PERCENT            screen brightness, 5-100
   theme_manager.py night 22:00 07:00 30   dim to 30% at night (or: night off)
   theme_manager.py idle 5 25              dim to 25% after 5 minutes without a touch (or: idle off)
+  theme_manager.py overheat on 85 60      turn the Pi off after 60 s at 85 C (or: overheat off)
+  theme_manager.py achievements on|off    keep track of achievements or not
+  theme_manager.py layout show|reset      what was moved on the screen, or put everything back
   theme_manager.py validate FILE.json
   theme_manager.py preview NAME OUT.png [seconds]
 """
@@ -88,7 +91,7 @@ MOOD_FADE = 0.6    # seconds to blend between moods
 HANDSHAKE_FLASH = 4.0
 FORCE_FILE = os.path.join(THEME_DIR, "force_mood.json")
 FACES_DIR = os.path.join(THEME_DIR, "faces")
-STATE_FILES = ("active.json", "force_mood.json", "touch.json", "display.json")   # JSON files in THEME_DIR that are not themes
+STATE_FILES = ("active.json", "force_mood.json", "touch.json", "display.json", "settings.json", "achievements.json", "layout.json")   # JSON files in THEME_DIR that are not themes
 PACK_RE = re.compile(r"^[A-Za-z0-9_\-]{1,32}$")
 
 # Built-in themes. bg/fg/accent/web are required, everything else is optional.
@@ -123,7 +126,7 @@ BUILTIN = {
                               {"type": "border", "size": 2, "color": "#01cdfe"}],
                   "elements": {"face": "#01cdfe", "status": "#05ffa1", "name": "#fffb96"},
                   "text": [{"text": "A E S T H E T I C", "x": 10, "y": 278, "size": 12, "color": "#05ffa1"}]},
-    "blood": {"bg": "#0a0000", "fg": "#ff2020", "accent": "#7a0000", "web": "#ff2020", "fps": 6,
+    "blood": {"bg": "#0a0000", "fg": "#ff2020", "accent": "#c01010", "web": "#ff2020", "fps": 6,
               "effects": [{"type": "pulse", "speed": 3, "strength": 0.5}, {"type": "vignette", "strength": 0.8},
                           {"type": "glow", "radius": 3, "strength": 0.7}]},
     "ice": {"bg": "#04121f", "fg": "#9fe8ff", "accent": "#3a8fb7", "web": "#3a8fb7", "fps": 5,
@@ -166,6 +169,114 @@ BUILTIN = {
                         "handshake": {"elements": {"face": "#39ff14"}, "effects": [{"type": "glow", "radius": 5, "strength": 1}]}}},
     "rainbow": {"bg": "#05050a", "fg": "#ffffff", "accent": "#ffffff", "web": "#b967ff", "fps": 8,
                 "effects": [{"type": "rainbow", "speed": 2}, {"type": "glow", "radius": 3, "strength": 0.7}]},
+    # ---- inspired by places, seasons and stories
+    "startrek": {"bg": "#000000", "fg": "#ff9900", "accent": "#cc99cc", "web": "#9999ff", "fps": 5,
+                 "description": "starship-console look: orange, lavender and blue on black, red alert when angry",
+                 "elements": {"face": "#99ccff", "name": "#ffcc66", "status": "#ffcc99", "channel": "#9999ff", "aps": "#9999ff",
+                              "uptime": "#cc6666", "shakes": "#ffcc66", "mode": "#cc99cc"},
+                 "effects": [{"type": "border", "size": 3, "color": "#ff9900"}, {"type": "glow", "radius": 2, "strength": 0.5},
+                             {"type": "scanlines", "strength": 0.12}],
+                 "text": [{"text": "STARDATE {stardate}", "x": 10, "y": 262, "size": 12, "bold": True, "color": "#cc99cc"},
+                          {"text": "ALL SYSTEMS NOMINAL ::: SCANNING ::: STANDING BY ::: ", "x": 10, "y": 278, "size": 11,
+                           "scroll": True, "speed": 30, "width": 290, "color": "#9999ff"}],
+                 "mood": {"angry": {"fg": "#ff3030", "accent": "#ff3030", "elements": {"face": "#ff3030", "name": "#ff3030"},
+                                    "effects": [{"type": "pulse", "speed": 8, "strength": 0.5}]},
+                          "broken": {"fg": "#ff3030", "accent": "#ff3030", "elements": {"face": "#ff3030"},
+                                     "effects": [{"type": "glitch", "interval": 1.5}]},
+                          "sad": {"fg": "#ffcc00", "accent": "#ffcc00", "elements": {"face": "#ffcc00"}},
+                          "handshake": {"elements": {"face": "#66ff99", "name": "#66ff99"}, "effects": [{"type": "glow", "radius": 5, "strength": 1}]}}},
+    "spring": {"bg": "#0f2a1c", "fg": "#e6ffd0", "accent": "#ff9ecb", "web": "#ff9ecb", "fps": 4,
+               "description": "fresh green with drifting blossoms",
+               "gradient": {"from": "#0f2a1c", "to": "#2f6b4a", "direction": "vertical"},
+               "elements": {"face": "#ffd6e8", "name": "#b8f5a0"},
+               "effects": [{"type": "stars", "density": 0.8, "speed": 1.5, "color": "#ffb7d5"}, {"type": "glow", "radius": 2, "strength": 0.4}],
+               "text": [{"text": "spring  {date}", "x": 10, "y": 278, "size": 11, "color": "#ffb7d5"}],
+               "mood": {"happy": {"elements": {"face": "#fff2a8"}}, "sad": {"fg": "#cfe8ff", "elements": {"face": "#cfe8ff"}}}},
+    "summer": {"bg": "#0b3d91", "fg": "#fff3c4", "accent": "#ffb703", "web": "#ffb703", "fps": 4,
+               "description": "deep blue sky and sea with sun sparkles",
+               "gradient": {"from": "#0b3d91", "to": "#006d77", "direction": "vertical"},
+               "elements": {"face": "#fff3c4", "name": "#ffe066", "status": "#ffffff"},
+               "effects": [{"type": "stars", "density": 0.5, "speed": 3, "color": "#ffe066"}, {"type": "glow", "radius": 3, "strength": 0.6}],
+               "text": [{"text": "summer  {time}", "x": 10, "y": 278, "size": 11, "color": "#ffe066"}],
+               "mood": {"excited": {"elements": {"face": "rainbow"}}, "sad": {"fg": "#d7ecff", "elements": {"face": "#d7ecff"}}}},
+    "autumn": {"bg": "#2a1206", "fg": "#ffcf8a", "accent": "#e07a1f", "web": "#e07a1f", "fps": 4,
+               "description": "warm browns and falling embers",
+               "gradient": {"from": "#2a1206", "to": "#5c2a0a", "direction": "vertical"},
+               "elements": {"face": "#ffb347", "name": "#ffd9a0"},
+               "effects": [{"type": "stars", "density": 0.7, "speed": 2, "color": "#ff8c1a"}, {"type": "vignette", "strength": 0.5}],
+               "text": [{"text": "autumn  {date}", "x": 10, "y": 278, "size": 11, "color": "#ff9a3d"}],
+               "mood": {"angry": {"fg": "#ff6b3d", "elements": {"face": "#ff6b3d"}}}},
+    "winter": {"bg": "#04121f", "fg": "#eaf6ff", "accent": "#9fd3f0", "web": "#9fd3f0", "fps": 4,
+               "description": "cold blue night with falling snow",
+               "gradient": {"from": "#04121f", "to": "#12466b", "direction": "vertical"},
+               "elements": {"face": "#d7f0ff", "name": "#9fd3f0"},
+               "effects": [{"type": "stars", "density": 1.0, "speed": 1, "color": "#ffffff"}, {"type": "vignette", "strength": 0.3}],
+               "text": [{"text": "winter  {date}", "x": 10, "y": 278, "size": 11, "color": "#9fd3f0"}],
+               "mood": {"sad": {"fg": "#8fb3d9", "elements": {"face": "#8fb3d9"}}, "happy": {"elements": {"face": "#fff6c9"}}}},
+    "mountain": {"bg": "#0d1b2e", "fg": "#f0f6ff", "accent": "#8fb3d9", "web": "#8fb3d9", "fps": 3,
+                 "description": "dusk over snowy peaks",
+                 "gradient": {"from": "#0d1b2e", "to": "#2a4365", "direction": "vertical"},
+                 "elements": {"face": "#dbe8f7", "name": "#ffd59e", "status": "#c5d8ee"},
+                 "effects": [{"type": "stars", "density": 0.3, "speed": 1.5, "color": "#ffffff"}, {"type": "vignette", "strength": 0.5}],
+                 "text": [{"text": "\u25B2 {name}  {time}", "x": 10, "y": 278, "size": 12, "color": "#ffd59e"}],
+                 "mood": {"sad": {"fg": "#a9b8c9", "elements": {"face": "#a9b8c9"}}, "excited": {"elements": {"face": "#ffd59e"}}}},
+    "ocean": {"bg": "#00132b", "fg": "#caf0f8", "accent": "#48cae4", "web": "#48cae4", "fps": 4,
+              "description": "deep water with drifting plankton",
+              "gradient": {"from": "#00132b", "to": "#005f73", "direction": "vertical"},
+              "elements": {"face": "#90e0ef", "name": "#caf0f8"},
+              "effects": [{"type": "stars", "density": 0.5, "speed": 2, "color": "#90e0ef"}, {"type": "glow", "radius": 3, "strength": 0.6}],
+              "text": [{"text": "depth  {uptime}", "x": 10, "y": 278, "size": 11, "color": "#48cae4"}],
+              "mood": {"sad": {"fg": "#7aa5c4", "elements": {"face": "#7aa5c4"}}, "excited": {"elements": {"face": "rainbow"}}}},
+    "forest": {"bg": "#06140b", "fg": "#c7f9cc", "accent": "#80ed99", "web": "#80ed99", "fps": 4,
+               "description": "night woods with fireflies",
+               "gradient": {"from": "#06140b", "to": "#123524", "direction": "vertical"},
+               "elements": {"face": "#b7ffbf", "name": "#ffe66d"},
+               "effects": [{"type": "stars", "density": 0.35, "speed": 2.5, "color": "#ffe66d"}, {"type": "vignette", "strength": 0.5}],
+               "text": [{"text": "{name} in the woods", "x": 10, "y": 278, "size": 11, "color": "#80ed99"}],
+               "mood": {"angry": {"fg": "#ff8a5c", "elements": {"face": "#ff8a5c"}}}},
+    "desert": {"bg": "#2b0f3a", "fg": "#ffe8b5", "accent": "#ffb347", "web": "#ffb347", "fps": 3,
+               "description": "purple dusk fading into orange sand",
+               "gradient": {"from": "#2b0f3a", "to": "#a44a1f", "direction": "vertical"},
+               "elements": {"face": "#fff1cf", "name": "#ffd18a"},
+               "effects": [{"type": "noise", "strength": 0.12}, {"type": "vignette", "strength": 0.45}],
+               "text": [{"text": "{date}  {temp}", "x": 10, "y": 278, "size": 11, "color": "#ffd18a"}],
+               "mood": {"sad": {"fg": "#e8c9a0", "elements": {"face": "#e8c9a0"}}}},
+    "aurora": {"bg": "#020c14", "fg": "#7dffb2", "accent": "#b18cff", "web": "#b18cff", "fps": 6,
+               "description": "northern lights: green and violet glow on a dark sky",
+               "gradient": {"from": "#020c14", "to": "#0b3a3a", "direction": "vertical"},
+               "elements": {"face": "#7dffb2", "name": "#b18cff", "status": "#c8ffe0"},
+               "effects": [{"type": "glow", "radius": 3, "strength": 0.8}, {"type": "pulse", "speed": 1.5, "strength": 0.25},
+                           {"type": "stars", "density": 0.4, "speed": 2, "color": "#ffffff"}],
+               "mood": {"excited": {"elements": {"face": "rainbow"}}, "sad": {"fg": "#8fa8ff", "elements": {"face": "#8fa8ff"}}}},
+    "volcano": {"bg": "#0a0000", "fg": "#ff8a3d", "accent": "#ff3d00", "web": "#ff3d00", "fps": 6,
+                "description": "black rock with a glowing orange heart",
+                "gradient": {"from": "#0a0000", "to": "#4a0d00", "direction": "vertical"},
+                "elements": {"face": "#ffb347", "name": "#ff3d00"},
+                "effects": [{"type": "pulse", "speed": 2, "strength": 0.35}, {"type": "noise", "strength": 0.2},
+                            {"type": "glow", "radius": 3, "strength": 0.7}],
+                "mood": {"angry": {"elements": {"face": "#ff2200"}, "effects": [{"type": "glitch", "interval": 2}]}}},
+    "halloween": {"bg": "#12001f", "fg": "#ff9a1f", "accent": "#b04bff", "web": "#b04bff", "fps": 6,
+                  "description": "orange and purple with a flickering glow",
+                  "gradient": {"from": "#12001f", "to": "#2b0a3d", "direction": "vertical"},
+                  "elements": {"face": "#ffb347", "name": "#d9a0ff"},
+                  "effects": [{"type": "pulse", "speed": 3, "strength": 0.3}, {"type": "stars", "density": 0.3, "speed": 2, "color": "#ff9a1f"},
+                              {"type": "vignette", "strength": 0.6}],
+                  "text": [{"text": "boo!  {time}", "x": 10, "y": 278, "size": 12, "bold": True, "color": "#ff9a1f"}],
+                  "mood": {"excited": {"elements": {"face": "#7dff5a"}}}},
+    "christmas": {"bg": "#0a2a14", "fg": "#f5fff5", "accent": "#e63946", "web": "#e63946", "fps": 4,
+                  "description": "red and green with falling snow",
+                  "gradient": {"from": "#0a2a14", "to": "#3b0d0d", "direction": "vertical"},
+                  "elements": {"face": "#ffffff", "name": "#80ed99", "status": "#ffd6d6"},
+                  "effects": [{"type": "stars", "density": 0.8, "speed": 1.5, "color": "#ffffff"}, {"type": "glow", "radius": 2, "strength": 0.5}],
+                  "text": [{"text": "happy holidays  {date}", "x": 10, "y": 278, "size": 11, "color": "#ffd6d6"}],
+                  "mood": {"excited": {"elements": {"face": "#ffe066"}}}},
+    "space": {"bg": "#000005", "fg": "#cfd8ff", "accent": "#6c7bff", "web": "#6c7bff", "fps": 5,
+              "description": "deep space with a slow star field",
+              "gradient": {"from": "#000005", "to": "#0a0a26", "direction": "vertical"},
+              "elements": {"face": "#e8ecff", "name": "#9aa8ff"},
+              "effects": [{"type": "stars", "density": 1.0, "speed": 2, "color": "#ffffff"}, {"type": "glow", "radius": 2, "strength": 0.4}],
+              "text": [{"text": "orbit {uptime}", "x": 10, "y": 278, "size": 11, "color": "#9aa8ff"}],
+              "mood": {"excited": {"elements": {"face": "rainbow"}}, "angry": {"fg": "#ff6b6b", "elements": {"face": "#ff6b6b"}}}},
 }
 
 
@@ -489,6 +600,13 @@ def _battery():
     return "n/a"
 
 
+def _stardate():
+    """A made-up 'stardate' from the calendar, like 26264.4 (year since 2000, thousandths of the year, tenths of the day)."""
+    lt = time.localtime()
+    days = 366 if (lt.tm_year % 4 == 0 and (lt.tm_year % 100 != 0 or lt.tm_year % 400 == 0)) else 365
+    return "%d.%d" % ((lt.tm_year - 2000) * 1000 + lt.tm_yday * 1000 // days, (lt.tm_hour * 60 + lt.tm_min) * 10 // 1440)
+
+
 PROVIDERS = {"ip": (15, _local_ip), "handshakes": (15, _count_handshakes), "cracked": (15, _count_cracked),
              "power": (2, _power_state), "battery": (10, _battery)}
 
@@ -502,6 +620,8 @@ class _Lazy(dict):
             return time.strftime("%H:%M:%S")
         if key == "date":
             return time.strftime("%Y-%m-%d")
+        if key == "stardate":
+            return _stardate()
         if key in PROVIDERS:
             ttl, fn = PROVIDERS[key]
             return _cached(key, ttl, fn)
@@ -1063,6 +1183,11 @@ def frame_interval(theme, t):
 # 4-point calibration maps them to screen pixels (saved in touch.json).
 TOUCH_FILE = os.path.join(THEME_DIR, "touch.json")
 DISPLAY_FILE = os.path.join(THEME_DIR, "display.json")
+SETTINGS_FILE = os.path.join(THEME_DIR, "settings.json")
+ACHIEVEMENTS_FILE = os.path.join(THEME_DIR, "achievements.json")
+LAYOUT_FILE = os.path.join(THEME_DIR, "layout.json")
+LAYOUT_MAX = 200          # furthest an element can be moved, in pixels
+LAYOUT_STEPS = (1, 5, 10)
 EVENT = struct.Struct("@llHHi")            # struct input_event on 64-bit Linux (24 bytes)
 EV_SYN, EV_KEY, EV_ABS = 0, 1, 3
 BTN_TOUCH, ABS_X, ABS_Y = 0x14A, 0, 1
@@ -1074,17 +1199,22 @@ SWIPE_PX = 90             # a swipe changes theme if it covers this many screen 
 SWIPE_MAX_S = 1.2
 TOAST_S = 1.5
 TRY_MIN_S, TRY_MAX_S = 5, 600      # how long a temporary theme may be tried
+OVERHEAT_GRACE_S = 30        # the on-screen countdown before an overheating Pi turns itself off
+OVERHEAT_SNOOZE_S = 600      # a touch cancels the countdown and keeps it quiet for this long
 WARN_HOLD_S = 10             # a low-power banner stays this long after the last under-voltage reading
 DIM_STEPS = (1.0, 0.6, 0.3)     # what the dim button on the System tab cycles through
 MENU_TIMEOUT = 20.0
 CALIB_TIMEOUT = 60.0
+ADJUST_TIMEOUT = 60.0
 CALIB_POINTS = ((40, 40), (440, 40), (40, 280), (440, 280))
 MENU_ROWS = 5
 CONFIRM_S = 4.0          # a power button must be tapped twice within this time
 GPS_TOKENS = ("gps", "lat", "lon", "sats")
 STATUS_LINES = ("CPU {temp}  load {cpu}  RAM {mem}", "IP {ip}", "GPS {gps}  {lat} {lon}",
                 "Up {uptime}  Power {power}  Bat {battery}", "Pwned {handshakes}  Cracked {cracked}  Session {session}")
-TABS = (("themes", (28, 10, 138, 38)), ("plugins", (144, 10, 254, 38)), ("system", (260, 10, 370, 38)))
+TAB_NAMES = ("themes", "plugins", "system", "awards", "layout")
+TABS = tuple((name, (28 + i * (424 // len(TAB_NAMES)), 10, 28 + i * (424 // len(TAB_NAMES)) + 424 // len(TAB_NAMES) - 4, 38))
+             for i, name in enumerate(TAB_NAMES))
 PROTECTED_PLUGINS = ('theme_manager',)   # never listed: switching it off would remove the menu itself
 
 
@@ -1146,21 +1276,42 @@ def to_screen(m, x, y):
 
 
 def menu_items(menu):
-    return menu["names"] if menu.get("tab", "themes") == "themes" else menu["plugins"]
+    tab = menu.get("tab", "themes")
+    return {"themes": menu["names"], "awards": menu["awards"], "layout": menu["layout"]}.get(tab, menu["plugins"])
+
+
+def adjust_popup(menu):
+    """Rectangle of the nudge popup: on the half of the screen away from the element being moved."""
+    box = menu.get("box")
+    y0 = 6 if box and (box[1] + box[3]) / 2 >= 160 else 218
+    return (60, y0, 424, y0 + 96)
+
+
+def adjust_hits(menu):
+    x0, y0, x1, y1 = adjust_popup(menu)
+    r1, r2 = y0 + 26, y0 + 62
+    return [((x0 + 12, r1, x0 + 92, r1 + 30), ("nudge", (-1, 0))), ((x0 + 100, r1, x0 + 180, r1 + 30), ("nudge", (1, 0))),
+            ((x0 + 188, r1, x0 + 268, r1 + 30), ("nudge", (0, -1))), ((x0 + 276, r1, x0 + 352, r1 + 30), ("nudge", (0, 1))),
+            ((x0 + 12, r2, x0 + 122, r2 + 28), ("step", None)), ((x0 + 130, r2, x0 + 230, r2 + 28), ("reset1", None)),
+            ((x0 + 238, r2, x0 + 352, r2 + 28), ("done", None))]
 
 
 def menu_hits(menu):
     """[(rect, (action, arg))] for the current menu page, in upright screen pixels."""
     tab, page = menu.get("tab", "themes"), menu["page"]
+    if menu["mode"] == "adjust":
+        return adjust_hits(menu)
     tabs = [(rect, ("tab", name)) for name, rect in TABS]
     common = [((220, 268, 320, 308), ("cal", None)), ((380, 268, 452, 308), ("close", None))] + tabs
     if tab == "system":
         return [((28, 268, 118, 308), ("refresh", None)), ((124, 268, 214, 308), ("dim", None)),
-                ((28, 166, 452, 200), ("mode", None)), ((28, 208, 152, 248), ("power", "restart")),
+                ((28, 166, 236, 200), ("mode", None)), ((242, 166, 452, 200), ("overheat", None)), ((28, 208, 152, 248), ("power", "restart")),
                 ((158, 208, 282, 248), ("power", "reboot")), ((288, 208, 412, 248), ("power", "shutdown"))] + common
-    act = "pick" if tab == "themes" else "toggle"
+    act = {"themes": "pick", "awards": "award", "layout": "adjust"}.get(tab, "toggle")
     hits = [((28, 44 + i * 44, 452, 44 + i * 44 + 40), (act, n))
             for i, n in enumerate(menu_items(menu)[page * MENU_ROWS:(page + 1) * MENU_ROWS])]
+    if tab == "layout":
+        hits.append(((326, 268, 374, 308), ("resetall", None)))
     return hits + [((28, 268, 118, 308), ("prev", None)), ((124, 268, 214, 308), ("next", None))] + common
 
 
@@ -1168,11 +1319,35 @@ def _mixc(a, b, k):
     return tuple(int(a[i] + (b[i] - a[i]) * k) for i in range(3))
 
 
+def draw_adjust(d, menu, bg, fg, acc, panel, line):
+    """The element being moved gets a box around it, and a small popup with - and + buttons sits on the other half of the screen."""
+    box = menu.get("box")
+    if box:
+        d.rectangle((box[0] - 3, box[1] - 3, box[2] + 2, box[3] + 2), outline=acc, width=2)
+        d.rectangle((box[0] - 5, box[1] - 5, box[2] + 4, box[3] + 4), outline=fg, width=1)
+    x0, y0, x1, y1 = adjust_popup(menu)
+    d.rounded_rectangle((x0, y0, x1, y1), 10, fill=panel, outline=acc, width=2)
+    dx, dy = menu.get("offset", (0, 0))
+    name = menu.get("adjust", "")
+    d.text((x0 + 12, y0 + 13), (name if len(name) <= 16 else name[:15] + "\u2026"), font=_font(15, True), fill=fg, anchor="lm")
+    d.text((x1 - 12, y0 + 13), "x %+d   y %+d" % (dx, dy), font=_font(15), fill=fg, anchor="rm")
+    for rect, (act, arg) in adjust_hits(menu):
+        rx0, ry0, rx1, ry1 = rect
+        big = act == "nudge"
+        label = ("%s %s" % ("X" if arg[0] else "Y", "+" if sum(arg) > 0 else "-")) if big else \
+            "step %d" % menu.get("step_px", 1) if act == "step" else "reset" if act == "reset1" else "done"
+        d.rounded_rectangle(rect, 8, fill=acc if act == "done" else line, outline=acc, width=2)
+        d.text(((rx0 + rx1) // 2, (ry0 + ry1) // 2), label, font=_font(20 if big else 16, True), fill=bg if act == "done" else fg, anchor="mm")
+
+
 def draw_menu(img, menu, theme):
     """Draw the menu (or the calibration prompt) onto an upright RGB frame."""
     d = ImageDraw.Draw(img)
     bg, fg, acc = _hex(theme["bg"]), _hex(theme["fg"]), _hex(theme["accent"])
     panel, line = _mixc(bg, (0, 0, 0), 0.35), _mixc(bg, fg, 0.18)
+    if menu["mode"] == "adjust":
+        draw_adjust(d, menu, bg, fg, acc, panel, line)
+        return
     d.rectangle((16, 8, 464, 312), fill=panel, outline=acc, width=2)
     if menu["mode"] == "calib":
         i = menu["step"]
@@ -1187,9 +1362,12 @@ def draw_menu(img, menu, theme):
         return
     tab, page = menu.get("tab", "themes"), menu["page"]
     pages = max(1, -(-len(menu_items(menu)) // MENU_ROWS))
-    if tab != "system":
-        d.text((452, 16), "%d/%d" % (page + 1, pages), font=_font(14), fill=fg, anchor="ra")
-    else:
+    if tab == "awards" and not menu.get("awards_on", True):
+        d.text((240, 150), "Achievements are switched off", font=_font(16, True), fill=fg, anchor="mm")
+        d.text((240, 178), "(Settings in the web editor, or settings.json)", font=_font(12), fill=_mixc(fg, bg, 0.4), anchor="mm")
+    if tab == "layout" and not menu["layout"]:
+        d.text((240, 150), "Nothing on the screen yet", font=_font(16, True), fill=fg, anchor="mm")
+    if tab == "system":
         for i, text in enumerate(menu.get("lines", ())):
             d.text((32, 46 + i * 24), text, font=_font(16), fill=fg)
     for rect, (act, arg) in menu_hits(menu):
@@ -1199,11 +1377,16 @@ def draw_menu(img, menu, theme):
             ask = bool(menu.get("confirm")) and menu["confirm"][0] == key
             other = "AUTO" if menu.get("mode_now") == "MANU" else "MANU"
             if act == "mode":
-                label = "tap again: restart in %s" % other if ask else "Mode: %s  (tap to switch)" % menu.get("mode_now", "?")
+                label = "tap again: %s" % other if ask else "Mode: %s" % menu.get("mode_now", "?")
             else:
                 label = "tap again" if ask else arg
             d.rounded_rectangle(rect, 8, fill=acc if ask else line, outline=acc, width=2)
             d.text(((x0 + x1) // 2, (y0 + y1) // 2), label, font=_font(16, True), fill=bg if ask else fg, anchor="mm")
+        elif act == "overheat":
+            on = menu.get("overheat", False)
+            d.rounded_rectangle(rect, 8, fill=acc if on else line, outline=acc, width=2)
+            d.text(((x0 + x1) // 2, (y0 + y1) // 2), "Hot-off: %s" % ("ON" if on else "OFF"), font=_font(16, True),
+                   fill=bg if on else fg, anchor="mm")
         elif act == "tab":
             on = arg == tab
             d.rectangle(rect, fill=acc if on else line, outline=acc, width=1)
@@ -1216,6 +1399,30 @@ def draw_menu(img, menu, theme):
             for j, key in enumerate(("bg", "fg", "accent")):
                 sx = x1 - 78 + j * 24
                 d.rectangle((sx, y0 + 10, sx + 18, y1 - 10), fill=_hex(menu["colors"][arg][key]), outline=fg)
+        elif act == "award":
+            info = menu["award_info"][arg]
+            done = info["unlocked"] is not None
+            d.rectangle(rect, fill=line, outline=acc if done else line, width=2)
+            title = ("\u2605 " if done else "") + info["name"]
+            d.text((x0 + 12, (y0 + y1) // 2), title if len(title) <= 21 else title[:20] + "\u2026",
+                   font=_font(18, done), fill=fg if done else _mixc(fg, bg, 0.45), anchor="lm")
+            px0, px1 = x1 - 96, x1 - 10
+            d.rounded_rectangle((px0, y0 + 7, px1, y1 - 7), 10, fill=acc if done else panel, outline=acc, width=2)
+            d.text(((px0 + px1) // 2, (y0 + y1) // 2), "done" if done else "%d/%d" % (min(int(info["progress"]), info["goal"] - 1 if info["goal"] > 1 else 0), info["goal"]),
+                   font=_font(15, True), fill=bg if done else fg, anchor="mm")
+        elif act == "adjust":
+            dx, dy = menu["layout_info"].get(arg, (0, 0))
+            moved = bool(dx or dy)
+            d.rectangle(rect, fill=line, outline=acc if moved else line, width=2)
+            d.text((x0 + 12, (y0 + y1) // 2), arg if len(arg) <= 22 else arg[:21] + "\u2026", font=_font(20, moved), fill=fg, anchor="lm")
+            px0, px1 = x1 - 120, x1 - 10
+            d.rounded_rectangle((px0, y0 + 7, px1, y1 - 7), 10, fill=acc if moved else panel, outline=acc, width=2)
+            d.text(((px0 + px1) // 2, (y0 + y1) // 2), "%+d,%+d" % (dx, dy) if moved else "move", font=_font(15, True),
+                   fill=bg if moved else fg, anchor="mm")
+        elif act == "resetall":
+            ask = bool(menu.get("confirm")) and menu["confirm"][0] == "resetall"
+            d.rectangle(rect, fill=acc if ask else line, outline=acc, width=1)
+            d.text(((x0 + x1) // 2, (y0 + y1) // 2), "sure?" if ask else "clear", font=_font(14, True), fill=bg if ask else fg, anchor="mm")
         elif act == "toggle":
             busy, on, bad = arg in menu["busy"], arg in menu["on"], arg in menu.get("failed", ())
             d.rectangle(rect, fill=line, outline=acc if on else line, width=2)
@@ -1225,13 +1432,105 @@ def draw_menu(img, menu, theme):
             d.text(((px0 + px1) // 2, (y0 + y1) // 2), "..." if busy else ("ERR" if bad else "ON" if on else "OFF"), font=_font(16, True),
                    fill=bg if on and not busy else fg, anchor="mm")
         else:
-            label = {"prev": "<", "next": ">", "cal": "calibrate", "close": "close", "refresh": "refresh",
+            label = {"prev": "<", "next": "> %d/%d" % (page + 1, pages) if pages > 1 else ">", "cal": "calibrate", "close": "close", "refresh": "refresh",
                      "dim": "dim %d%%" % round(menu.get("dim", 1.0) * 100)}[act]
             d.rectangle(rect, fill=line, outline=acc, width=1)
             d.text(((x0 + x1) // 2, (y0 + y1) // 2), label, font=_font(16, True), fill=fg, anchor="mm")
 
 
 # --------------------------------------------------------------------- plugin
+# id, name, description, statistic, goal
+ACHIEVEMENTS = (
+    ("first_shake", "First Blood", "Capture your first handshake", "handshakes", 1),
+    ("shakes_10", "Getting Going", "Capture 10 handshakes", "handshakes", 10),
+    ("shakes_50", "Collector", "Capture 50 handshakes", "handshakes", 50),
+    ("shakes_100", "Centurion", "Capture 100 handshakes", "handshakes", 100),
+    ("shakes_500", "Legend", "Capture 500 handshakes", "handshakes", 500),
+    ("cracked_1", "Safe Cracker", "Get a password cracked", "cracked", 1),
+    ("cracked_10", "Locksmith", "Get 10 passwords cracked", "cracked", 10),
+    ("uptime_1", "Warming Up", "Run for 1 hour in total", "hours", 1),
+    ("uptime_24", "Around the Clock", "Run for 24 hours in total", "hours", 24),
+    ("uptime_100", "Marathon", "Run for 100 hours in total", "hours", 100),
+    ("days_3", "Regular", "Use it on 3 different days", "days", 3),
+    ("days_7", "A Week Strong", "Use it on 7 different days", "days", 7),
+    ("days_30", "Habit", "Use it on 30 different days", "days", 30),
+    ("themes_5", "Stylist", "Try 5 different themes", "themes", 5),
+    ("themes_15", "Fashionista", "Try 15 different themes", "themes", 15),
+    ("night_owl", "Night Owl", "Be running at 3 in the morning", "night_owl", 1),
+    ("swiper", "Swiper", "Change theme by swiping the screen", "swipes", 1),
+    ("tinkerer", "Tinkerer", "Move something on the screen", "layout_moves", 1),
+    ("too_hot", "Too Hot to Handle", "Make the heat guard step in", "hot_events", 1),
+    ("designer", "Face Designer", "Upload your own face images", "face_uploads", 1),
+    ("prepared", "Prepared", "Download a backup of your themes", "backups", 1),
+)
+ACH_INDEX = {a[0]: a for a in ACHIEVEMENTS}
+LIST_STATS = ("days", "themes")
+LIST_KEPT = 400
+
+
+def default_stats():
+    return {"handshakes": 0, "cracked": 0, "uptime_seconds": 0.0, "days": [], "themes": [], "night_owl": 0,
+            "swipes": 0, "layout_moves": 0, "hot_events": 0, "face_uploads": 0, "backups": 0}
+
+
+def clean_achievements(data):
+    """Saved achievement state {unlocked: {id: time}, stats: {...}}. Unknown keys are dropped and junk falls back to defaults,
+    so a hand-edited or damaged file can never break anything."""
+    out = {"unlocked": {}, "stats": default_stats()}
+    if not isinstance(data, dict):
+        return out
+    unlocked = data.get("unlocked")
+    for k, v in (unlocked.items() if isinstance(unlocked, dict) else ()):
+        if k in ACH_INDEX and isinstance(v, (int, float)) and not isinstance(v, bool):
+            out["unlocked"][k] = float(v)
+    stats = data.get("stats") if isinstance(data.get("stats"), dict) else {}
+    for k in out["stats"]:
+        v = stats.get(k)
+        if k in LIST_STATS:
+            out["stats"][k] = [str(x)[:40] for x in v][-LIST_KEPT:] if isinstance(v, list) else []
+        elif isinstance(v, (int, float)) and not isinstance(v, bool) and v >= 0:
+            out["stats"][k] = v
+    return out
+
+
+def ach_progress(stats, stat):
+    if stat == "hours":
+        return stats["uptime_seconds"] / 3600.0
+    if stat in LIST_STATS:
+        return len(stats[stat])
+    return stats[stat]
+
+
+def clean_layout(data):
+    """{element name: [dx, dy]} from a saved layout.json. Junk is dropped, distances are limited, and zero offsets are not kept."""
+    raw = data.get("offsets") if isinstance(data, dict) else None
+    out = {}
+    for key, val in (raw.items() if isinstance(raw, dict) else ()):
+        if not isinstance(key, str) or not 0 < len(key) <= 40 or len(out) >= 80:
+            continue
+        if not (isinstance(val, (list, tuple)) and len(val) == 2 and all(isinstance(v, (int, float)) and not isinstance(v, bool) for v in val)):
+            continue
+        dx, dy = (max(-LAYOUT_MAX, min(LAYOUT_MAX, int(v))) for v in val)
+        if dx or dy:
+            out[key] = [dx, dy]
+    return out
+
+
+def shifted(xy, dx, dy):
+    """An element's xy (x, y or x0, y0, x1, y1) moved by dx, dy."""
+    return tuple(v + (dx if i % 2 == 0 else dy) for i, v in enumerate(xy))
+
+
+def clean_settings(cfg):
+    """Validated settings: whether an overheating Pi turns itself off (and at what temperature, after how long)."""
+    if not isinstance(cfg, dict):
+        raise ValueError("settings must be a JSON object")
+    return {"overheat_off": bool(cfg.get("overheat_off", False)),
+            "overheat_temp": _num(cfg.get("overheat_temp", 85), 70, 95, "overheat_temp"),
+            "overheat_seconds": _num(cfg.get("overheat_seconds", 60), 10, 600, "overheat_seconds"),
+            "achievements": bool(cfg.get("achievements", True))}
+
+
 def _clock(value, what):
     m = re.fullmatch(r"([01]?\d|2[0-3]):([0-5]\d)", str(value).strip())
     if not m:
@@ -1326,7 +1625,7 @@ def draw_toast(img, text, theme):
 
 class ThemeManager(plugins.Plugin):
     __author__ = "theme_manager contributors"
-    __version__ = "2.2.0"
+    __version__ = "2.3.0"
     __license__ = "GPL3"
     __description__ = "Theme engine for the 3.5 inch display: colors, effects, animations, custom text, web GUI."
 
@@ -1346,6 +1645,19 @@ class ThemeManager(plugins.Plugin):
         self._gps = None
         self._gps_wanted = 0
         self._toast = None
+        self._ach = clean_achievements(None)
+        self._ach_lock = threading.Lock()
+        self._ach_dirty = False
+        self._ach_loaded = False
+        self._ach_saved = 0
+        self._ach_last = 0
+        self._ach_next_slow = 0
+        self._settings = clean_settings({})
+        self._settings_mtime = 0
+        self._layout = {}
+        self._hot_since = 0
+        self._shutdown_at = 0
+        self._snooze_until = 0
         self._try_until = 0
         self._warn = ""
         self._last_low = 0
@@ -1418,6 +1730,7 @@ class ThemeManager(plugins.Plugin):
         if name not in themes:
             raise KeyError(name)
         theme = _clean(themes[name])
+        self._stat("themes", mark=name)
         if persist:
             self._try_until = 0
         with self._lock:
@@ -1497,6 +1810,12 @@ class ThemeManager(plugins.Plugin):
         if m != self._display_mtime:
             self._load_display()
         try:
+            m = os.path.getmtime(SETTINGS_FILE)
+        except OSError:
+            m = 0
+        if m != self._settings_mtime:
+            self._load_settings()
+        try:
             m = os.path.getmtime(FORCE_FILE)
             if m != self._force_mtime:
                 with open(FORCE_FILE) as fp:
@@ -1537,20 +1856,35 @@ class ThemeManager(plugins.Plugin):
                 if canvas.mode != "1":
                     return _orig(canvas, drawer)
                 before = canvas.copy()
-                _orig(canvas, drawer)
+                off = mgr._layout.get(_key)
+                home = _elem.xy
+                if off:
+                    try:
+                        _elem.xy = shifted(home, off[0], off[1])
+                    except Exception:
+                        off = None
                 try:
-                    changed = ImageChops.logical_and(ImageChops.logical_xor(before, canvas), canvas)
-                    box = changed.getbbox()
-                    if box:
-                        mgr._building["layers"][_key] = (changed.crop(box).convert("L"), box)
-                    if _key == "face":
-                        mgr._building["face"] = (_elem.value, tuple(_elem.xy))
-                except Exception as e:
-                    logging.debug("[theme_manager] capture %s: %s", _key, e)
+                    _orig(canvas, drawer)
+                    mgr._capture(_key, _elem, before, canvas)
+                finally:
+                    if off:
+                        _elem.xy = home
 
             elem.draw = wrapped
             elem._tm_wrapped = True
             self._wrapped.append(elem)
+
+    def _capture(self, key, elem, before, canvas):
+        """Remember which pixels the element just drew (and, for the face, where it is)."""
+        try:
+            changed = ImageChops.logical_and(ImageChops.logical_xor(before, canvas), canvas)
+            box = changed.getbbox()
+            if box:
+                self._building["layers"][key] = (changed.crop(box).convert("L"), box)
+            if key == "face":
+                self._building["face"] = (elem.value, tuple(elem.xy))
+        except Exception as e:
+            logging.debug("[theme_manager] capture %s: %s", key, e)
 
     def _on_frame(self, canvas):
         """Runs synchronously at the end of every UI draw pass: publish what the elements drew."""
@@ -1643,6 +1977,9 @@ class ThemeManager(plugins.Plugin):
             draw_banner(img, self._warn)
         menu = self._menu
         if menu is not None:
+            if menu["mode"] == "adjust":
+                region = ctx["layers"].get(menu["adjust"])
+                menu["box"] = region[1] if region else None
             if menu.get("tab") == "system" and menu["mode"] == "list":
                 self._fill_status(menu)
             draw_menu(img, menu, self._theme)
@@ -1709,18 +2046,247 @@ class ThemeManager(plugins.Plugin):
             mode = "list" if self._touch_m else "calib"
         themes = self._all()
         with self._menu_lock:
-            self._menu = {"mode": mode, "tab": tab if tab in ("themes", "plugins", "system") else "themes", "page": 0,
-                          "pages": {"themes": 0, "plugins": 0, "system": 0}, "confirm": None, "plugins": self._plugin_names(),
+            self._menu = {"mode": mode, "tab": tab if tab in TAB_NAMES else "themes", "page": 0,
+                          "pages": {t: 0 for t in TAB_NAMES}, "confirm": None, "awards_on": self._settings["achievements"],
+                          "awards": [a[0] for a in ACHIEVEMENTS] if self._settings["achievements"] else [], "layout": [], "layout_info": {},
+                          "award_info": {r["id"]: r for r in self.award_rows()}, "plugins": self._plugin_names(),
                           "on": set(plugins.loaded), "busy": set(), "failed": set(), "step": 0, "raw": [], "names": list(themes),
                           "colors": {n: t for n, t in themes.items()}, "active": self._active,
                           "until": now + (CALIB_TIMEOUT if mode == "calib" else MENU_TIMEOUT)}
+        self._sync_layout_menu(self._menu)
         self._wake.set()
         self._refresh_now()
+
+    def _sync_layout_menu(self, menu):
+        rows = self.layout_rows()
+        menu["layout"] = [r["key"] for r in rows]
+        menu["layout_info"] = {r["key"]: (r["dx"], r["dy"]) for r in rows}
+        if menu.get("adjust"):
+            menu["offset"] = tuple(self._layout.get(menu["adjust"], (0, 0)))
 
     def close_menu(self):
         with self._menu_lock:
             self._menu = None
         self._refresh_now()
+
+    # ---- achievements
+    def _load_achievements(self):
+        try:
+            with open(ACHIEVEMENTS_FILE) as fp:
+                data = json.load(fp)
+        except (OSError, ValueError):
+            data = None
+        self._ach = clean_achievements(data)
+        self._ach_loaded = True
+        if data is None:      # first run: start from what is already on disk, and unlock those without fanfare
+            for stat, count in (("handshakes", _count_handshakes), ("cracked", _count_cracked)):
+                try:
+                    self._ach["stats"][stat] = int(count())
+                except (ValueError, OSError):
+                    pass
+            self._check_achievements(silent=True)
+            self._save_achievements()
+
+    def _save_achievements(self):
+        try:
+            os.makedirs(THEME_DIR, exist_ok=True)
+            with self._ach_lock:
+                write_json(ACHIEVEMENTS_FILE, self._ach, indent=1)
+            self._ach_dirty = False
+            self._ach_saved = time.time()
+        except OSError as e:
+            logging.warning("[theme_manager] could not save achievements: %s", e)
+
+    def _stat(self, name, add=None, at_least=None, mark=None):
+        """Change one statistic (add to it, raise it to a value, or add a name to a list) and check for new achievements."""
+        if not self._settings["achievements"]:
+            return
+        with self._ach_lock:
+            stats = self._ach["stats"]
+            if add is not None:
+                stats[name] += add
+            elif at_least is not None:
+                if at_least <= stats[name]:
+                    return
+                stats[name] = at_least
+            elif mark is not None:
+                if mark in stats[name]:
+                    return
+                stats[name] = (stats[name] + [mark])[-LIST_KEPT:]
+            self._ach_dirty = True
+        self._check_achievements()
+
+    def _check_achievements(self, silent=False):
+        new = []
+        with self._ach_lock:
+            for aid, name, desc, stat, goal in ACHIEVEMENTS:
+                if aid not in self._ach["unlocked"] and ach_progress(self._ach["stats"], stat) >= goal:
+                    self._ach["unlocked"][aid] = time.time()
+                    new.append(name)
+        if not new:
+            return
+        self._save_achievements()
+        if silent:
+            return
+        logging.info("[theme_manager] achievement unlocked: %s", ", ".join(new))
+        self.toast("\u2605 %s%s" % (new[0], " (+%d more)" % (len(new) - 1) if len(new) > 1 else ""), seconds=4)
+        self._refresh_now()
+
+    def award_rows(self):
+        """One dict per achievement: id, name, desc, progress, goal, unlocked (time or None)."""
+        with self._ach_lock:
+            return [{"id": aid, "name": name, "desc": desc, "goal": goal, "progress": ach_progress(self._ach["stats"], stat),
+                     "unlocked": self._ach["unlocked"].get(aid)} for aid, name, desc, stat, goal in ACHIEVEMENTS]
+
+    def _tick_achievements(self, now):
+        if not self._settings["achievements"]:
+            self._ach_last = 0
+            return
+        if self._ach_last and now - self._ach_last < 1:      # once a second is plenty
+            return
+        dt = min(now - self._ach_last, 30) if self._ach_last else 0
+        self._ach_last = now
+        with self._ach_lock:
+            self._ach["stats"]["uptime_seconds"] += dt
+            self._ach_dirty = self._ach_dirty or dt > 0
+        self._stat("days", mark=time.strftime("%Y-%m-%d", time.localtime(now)))
+        if time.localtime(now).tm_hour == 3:
+            self._stat("night_owl", at_least=1)
+        if now >= self._ach_next_slow:                 # counting the cracked passwords reads files: once a minute
+            self._ach_next_slow = now + 60
+            try:
+                self._stat("cracked", at_least=int(_count_cracked()))
+            except (ValueError, OSError):
+                pass
+        self._check_achievements()
+        if self._ach_dirty and now - self._ach_saved > 300:
+            self._save_achievements()
+
+    # ---- layout (moving things on the screen)
+    def _load_layout(self):
+        try:
+            with open(LAYOUT_FILE) as fp:
+                self._layout = clean_layout(json.load(fp))
+        except FileNotFoundError:
+            self._layout = {}
+        except (ValueError, OSError) as e:
+            logging.warning("[theme_manager] layout.json: %s", e)
+
+    def _save_layout(self):
+        os.makedirs(THEME_DIR, exist_ok=True)
+        write_json(LAYOUT_FILE, {"offsets": self._layout})
+
+    def _redraw_ui(self):
+        try:
+            if self._view:
+                self._view.update(force=True)
+        except Exception as e:
+            logging.debug("[theme_manager] layout redraw: %s", e)
+        self._refresh_now()
+
+    def set_offset(self, key, dx, dy, count=True):
+        """Put one element at dx, dy from where pwnagotchi draws it (0, 0 puts it back). Returns the stored offset."""
+        if not isinstance(key, str) or not 0 < len(key) <= 40:
+            raise ValueError("element name")
+        dx, dy = (max(-LAYOUT_MAX, min(LAYOUT_MAX, int(v))) for v in (dx, dy))
+        if dx or dy:
+            if key not in self._layout and len(self._layout) >= 80:
+                raise ValueError("too many moved elements")
+            self._layout[key] = [dx, dy]
+        else:
+            self._layout.pop(key, None)
+        self._save_layout()
+        if count:
+            self._stat("layout_moves", add=1)
+        self._redraw_ui()
+        return [dx, dy]
+
+    def reset_layout(self):
+        self._layout = {}
+        self._save_layout()
+        self._redraw_ui()
+
+    def layout_rows(self):
+        """[{key, box, dx, dy}] for every element on the screen now, plus any moved element that is not drawn at the moment."""
+        ctx = self._ctx or {"layers": {}}
+        rows = {k: {"key": k, "box": list(region[1]), "dx": self._layout.get(k, (0, 0))[0], "dy": self._layout.get(k, (0, 0))[1]}
+                for k, region in ctx["layers"].items()}
+        for k, (dx, dy) in self._layout.items():
+            rows.setdefault(k, {"key": k, "box": None, "dx": dx, "dy": dy})
+        return sorted(rows.values(), key=lambda r: ((r["box"] or [0, 999])[1], (r["box"] or [0, 0])[0], r["key"]))
+
+    # ---- settings (overheating auto-off, achievements)
+    def _load_settings(self):
+        try:
+            with open(SETTINGS_FILE) as fp:
+                cfg = clean_settings(json.load(fp))
+            self._settings_mtime = os.path.getmtime(SETTINGS_FILE)
+        except FileNotFoundError:
+            cfg, self._settings_mtime = clean_settings({}), 0
+        except (ValueError, OSError) as e:
+            logging.warning("[theme_manager] settings.json: %s", e)
+            return
+        self._settings = cfg
+        if cfg["achievements"] and not self._ach_loaded:
+            self._load_achievements()
+        if not cfg["overheat_off"]:
+            self._hot_since = self._shutdown_at = 0
+
+    def save_settings(self, cfg):
+        """Validate and store new settings (the web editor and the touch menu use this)."""
+        self._settings = clean_settings(cfg)
+        os.makedirs(THEME_DIR, exist_ok=True)
+        write_json(SETTINGS_FILE, self._settings)
+        self._settings_mtime = os.path.getmtime(SETTINGS_FILE)
+        if self._settings["achievements"] and not self._ach_loaded:
+            self._load_achievements()
+        if not self._settings["overheat_off"]:
+            self._hot_since = self._shutdown_at = 0
+        return self._settings
+
+    def _toggle_overheat(self):
+        on = not self._settings["overheat_off"]
+        self.save_settings(dict(self._settings, overheat_off=on))
+        self.toast("auto-off when hot: %s (%d C)" % ("ON" if on else "OFF", self._settings["overheat_temp"]))
+        self._set_warning(time.time())
+        self._refresh_now()
+
+    def _check_overheat(self, temp, now):
+        """With the option on: if the CPU stays at or above the limit long enough, count down 30 s on screen and turn the
+        Pi off (a touch cancels and snoozes it). Cooling down cancels it too."""
+        s = self._settings
+        if not s["overheat_off"] or temp is None or now < self._snooze_until:
+            self._hot_since = 0
+            return
+        if temp >= s["overheat_temp"]:
+            self._hot_since = self._hot_since or now
+            if not self._shutdown_at and now - self._hot_since >= s["overheat_seconds"]:
+                self._shutdown_at = now + OVERHEAT_GRACE_S
+                logging.critical("[theme_manager] CPU at %.0f C for %d s: turning the Pi off in %d s unless you touch the screen",
+                                 temp, s["overheat_seconds"], OVERHEAT_GRACE_S)
+        else:
+            self._hot_since = 0
+            if self._shutdown_at and temp < s["overheat_temp"] - 3:
+                self._shutdown_at = 0
+                logging.warning("[theme_manager] the CPU cooled down to %.0f C: not turning off", temp)
+                self._set_warning(now)
+
+    def _countdown(self, now):
+        if now >= self._shutdown_at:
+            self._shutdown_at = 0
+            logging.critical("[theme_manager] overheating: turning the Pi off now")
+            self._set_warning(now)
+            self._do_system("shutdown")
+        else:
+            self._set_warning(now)
+
+    def _cancel_overheat(self, now):
+        self._shutdown_at = 0
+        self._hot_since = 0
+        self._snooze_until = now + OVERHEAT_SNOOZE_S
+        logging.warning("[theme_manager] overheating shutdown cancelled by a touch (quiet for %d min)", OVERHEAT_SNOOZE_S // 60)
+        self.toast("shutdown cancelled", now=now)
+        self._set_warning(now)
 
     # ---- brightness: manual dim, night window, idle dimming
     def _load_display(self):
@@ -1744,6 +2310,17 @@ class ThemeManager(plugins.Plugin):
         if abs(dim - self._dim) > 0.005:
             self._dim = dim
             self._refresh_now()
+
+    def save_display(self, cfg):
+        """Validate and store brightness settings (the web editor uses this). Returns the stored settings."""
+        cfg = clean_display(cfg)
+        os.makedirs(THEME_DIR, exist_ok=True)
+        write_json(DISPLAY_FILE, cfg)
+        self._display_mtime = os.path.getmtime(DISPLAY_FILE)
+        self._display_cfg = cfg
+        self._update_dim(time.time())
+        self._refresh_now()
+        return cfg
 
     def _cycle_dim(self):
         """The System tab's dim button: 100% -> 60% -> 30% -> 100%."""
@@ -1808,16 +2385,41 @@ class ThemeManager(plugins.Plugin):
         if self._touch_m is None:
             return
         x, y = to_screen(self._touch_m, rx, ry)
-        menu["until"] = now + MENU_TIMEOUT
+        menu["until"] = now + (ADJUST_TIMEOUT if menu["mode"] == "adjust" else MENU_TIMEOUT)
         for (x0, y0, x1, y1), (act, arg) in menu_hits(menu):
             if x0 <= x <= x1 and y0 <= y <= y1:
                 pages = max(1, -(-len(menu_items(menu)) // MENU_ROWS))
-                if act not in ("power", "mode"):
+                if act not in ("power", "mode", "resetall"):
                     menu["confirm"] = None
                 if act == "tab":
                     menu["pages"][menu["tab"]] = menu["page"]
                     menu["tab"] = arg
                     menu["page"] = menu["pages"][arg]
+                elif act == "resetall":
+                    ask = menu.get("confirm")
+                    if ask and ask[0] == "resetall" and now <= ask[1]:
+                        menu["confirm"] = None
+                        self.reset_layout()
+                        self._sync_layout_menu(menu)
+                        return
+                    menu["confirm"] = ("resetall", now + CONFIRM_S)
+                elif act == "adjust":
+                    menu.update(mode="adjust", adjust=arg, step_px=menu.get("step_px", 1))
+                    self._sync_layout_menu(menu)
+                    menu["until"] = now + ADJUST_TIMEOUT
+                    menu["box"] = next((tuple(r["box"]) for r in self.layout_rows() if r["key"] == arg and r["box"]), None)
+                elif act in ("nudge", "step", "reset1", "done"):
+                    key = menu["adjust"]
+                    cur = self._layout.get(key, [0, 0])
+                    if act == "nudge":
+                        self.set_offset(key, cur[0] + arg[0] * menu["step_px"], cur[1] + arg[1] * menu["step_px"])
+                    elif act == "reset1":
+                        self.set_offset(key, 0, 0, count=False)
+                    elif act == "step":
+                        menu["step_px"] = LAYOUT_STEPS[(LAYOUT_STEPS.index(menu["step_px"]) + 1) % len(LAYOUT_STEPS)]
+                    else:
+                        menu.update(mode="list", adjust=None, box=None)
+                    self._sync_layout_menu(menu)
                 elif act in ("power", "mode"):
                     key = "mode" if act == "mode" else arg
                     ask = menu.get("confirm")
@@ -1847,6 +2449,15 @@ class ThemeManager(plugins.Plugin):
                 elif act == "dim":
                     self._cycle_dim()
                     return
+                elif act == "overheat":
+                    self._toggle_overheat()
+                    return
+                elif act == "award":
+                    info = menu["award_info"].get(arg)
+                    if info:
+                        self.toast(info["desc"], seconds=3, now=now)
+                        self._refresh_now()
+                    return
                 elif act == "cal":
                     menu.update(mode="calib", step=0, raw=[])
                     menu["until"] = now + CALIB_TIMEOUT
@@ -1856,6 +2467,8 @@ class ThemeManager(plugins.Plugin):
                 self._refresh_now()
                 return
         menu["confirm"] = None
+        if menu["mode"] == "adjust":
+            return     # taps beside the popup do nothing, so the element being moved stays in view
         if not (16 <= x <= 464 and 8 <= y <= 312):   # a tap outside the panel closes it
             self.close_menu()
 
@@ -1879,6 +2492,9 @@ class ThemeManager(plugins.Plugin):
 
     # ---- guard: keep the Pi cool
     def _guard_tick(self, now):
+        self._tick_achievements(now)
+        if self._shutdown_at:
+            self._countdown(now)
         if now >= self._next_temp:
             self._next_temp = now + 5
             self._update_dim(now)
@@ -1887,6 +2503,7 @@ class ThemeManager(plugins.Plugin):
             except (OSError, ValueError):
                 temp = None
             self._temp = temp
+            self._check_overheat(temp, now)
             self._set_warning(now)
             if temp is not None:
                 new = heat_factor(temp, self._heat)
@@ -1894,6 +2511,8 @@ class ThemeManager(plugins.Plugin):
                     logging.warning("[theme_manager] CPU at %.0f C: animation %s", temp,
                                     "paused" if new is None else "slowed down" if new > 1 else "back to normal")
                     self._heat = new
+                    if new != 1.0:
+                        self._stat("hot_events", add=1)
                     self._wake.set()
         if now >= self._next_power:
             self._next_power = now + 2
@@ -1914,6 +2533,8 @@ class ThemeManager(plugins.Plugin):
         """Show or hide the red banner for low power / high temperature (a theme can switch it off)."""
         low = self._last_low > 0 and now - self._last_low < WARN_HOLD_S
         text = warning_text(low, self._temp) if self._theme.get("warnings", True) else ""
+        if self._shutdown_at:
+            text = "TOO HOT: OFF IN %ds (touch to cancel)" % max(0, int(self._shutdown_at - now + 0.999))
         if text != self._warn:
             self._warn = text
             self._refresh_now()
@@ -1972,6 +2593,7 @@ class ThemeManager(plugins.Plugin):
 
     def _fill_status(self, menu):
         menu["dim"] = self._display_cfg["dim"]
+        menu["overheat"] = self._settings["overheat_off"]
         menu["lines"] = [_expand(t) for t in STATUS_LINES]
         menu["mode_now"] = self._agent_mode()
 
@@ -2077,6 +2699,7 @@ class ThemeManager(plugins.Plugin):
         idx = names.index(self._active) if self._active in names else 0
         name = names[(idx + (-1 if dx > 0 else 1)) % len(names)]
         self._last_swipe = now
+        self._stat("swipes", add=1)
         self.toast(name, now=now)
         try:
             self._apply(name, persist=True)
@@ -2089,6 +2712,8 @@ class ThemeManager(plugins.Plugin):
             self._abs[code] = value
         elif etype == EV_KEY and code == BTN_TOUCH:
             if value:
+                if self._shutdown_at:
+                    self._cancel_overheat(now)
                 self._down = (now, [])
                 self._swallow = self._idle_dimmed
                 self._last_touch = now
@@ -2259,6 +2884,8 @@ class ThemeManager(plugins.Plugin):
         self._running = True
         threading.Thread(target=self._anim_loop, daemon=True, name="theme-anim").start()
         self._load_display()
+        self._load_settings()
+        self._load_layout()
         global STAT_SOURCE
         STAT_SOURCE = self._live_stat
         threading.Thread(target=self._gps_loop, daemon=True, name="theme-gps").start()
@@ -2279,11 +2906,14 @@ class ThemeManager(plugins.Plugin):
         self._view = ui
 
     def on_handshake(self, agent, filename, access_point, *args):
+        self._stat("handshakes", add=1)
         self._event_until = time.time() + HANDSHAKE_FLASH
         self._wake.set()
 
     def on_unload(self, ui):
         self._running = False
+        if self._ach_dirty:
+            self._save_achievements()
         for elem in self._wrapped:
             try:
                 del elem.draw
@@ -2338,7 +2968,18 @@ class ThemeManager(plugins.Plugin):
         if path == "api/themes":
             return jsonify({"active": self._active, "themes": self._all()})
 
+        if path == "api/achievements":
+            return jsonify({"enabled": self._settings["achievements"], "achievements": self.award_rows()})
+
+        if path == "api/settings" and request.method != "POST":
+            return jsonify({"settings": self._settings, "display": self._display_cfg,
+                            "limits": {"overheat_temp": [70, 95], "overheat_seconds": [10, 600]}})
+
+        if path == "api/layout" and request.method != "POST":
+            return jsonify({"rows": self.layout_rows(), "max": LAYOUT_MAX})
+
         if path == "api/backup":
+            self._stat("backups", add=1)
             return Response(make_backup(), mimetype="application/zip",
                             headers={"Content-Disposition": "attachment; filename=theme-manager-backup.zip"})
 
@@ -2416,7 +3057,27 @@ class ThemeManager(plugins.Plugin):
                             report["added"].append("%s (%s)" % (f.filename, result))
                         except ValueError as e:
                             report["invalid"].append(str(e))
+                    if report["added"]:
+                        self._stat("face_uploads", add=1)
                     return jsonify(dict(report, ok=bool(report["added"])))
+                if path == "api/settings":
+                    if "display" in data:
+                        clean_display(data["display"])       # check both halves before saving either
+                    if "settings" in data and isinstance(data["settings"], dict):
+                        clean_settings(dict(self._settings, **data["settings"]))
+                    if "display" in data:
+                        self.save_display(data["display"])
+                    if "settings" in data:
+                        if not isinstance(data["settings"], dict):
+                            raise ValueError("settings must be a JSON object")
+                        self.save_settings(dict(self._settings, **data["settings"]))
+                    return jsonify({"ok": True, "settings": self._settings, "display": self._display_cfg})
+                if path == "api/layout":
+                    if data.get("reset"):
+                        self.reset_layout()
+                    else:
+                        self.set_offset(data.get("key"), data.get("dx", 0), data.get("dy", 0))
+                    return jsonify({"ok": True, "rows": self.layout_rows()})
                 if path == "api/faces/delete":
                     return jsonify({"ok": delete_pack(data.get("pack", ""))})
                 if path == "api/try":
@@ -2549,7 +3210,7 @@ const FX={glow:{radius:[0,12,1,3],strength:[0,1,.05,.8]},scanlines:{strength:[0,
 const ANIM=['pulse','rainbow','glitch','rain','stars','noise'];
 const MOODS=['look_r','sleep','awake','bored','intense','cool','happy','grateful','excited','motivated','demotivated','smart','lonely','sad','angry','friend','broken','debug','upload','handshake'];
 const HOLDERS=['{name}','{time}','{date}','{cpu}','{temp}','{mem}','{uptime}','{ip}','{mode}','{gps}','{lat}','{lon}','{sats}','{handshakes}','{cracked}','{session}','{power}','{battery}'];
-const TABS=['Colors','Effects','Text','Elements','Moods','Faces','JSON'];
+const TABS=['Colors','Effects','Text','Elements','Moods','Faces','JSON','Layout','Awards','Settings'];
 let S={active:'',themes:{}},sel='',cur={},info={elements:[],entities:[],packs:{}},tab='Colors',mood='sad',pvMood=null,busy=false,dirty=false,pvErr=false,timer=null;
 const say=t=>$('msg').textContent=t||'';
 /* After the plugin restarts (or the browser loses its session) the page's token is stale: fetch a fresh one and retry once. */
@@ -2709,9 +3370,68 @@ async function importUrl(u){u=u.trim();
  try{const r=await fetch(u);if(!r.ok)return say('could not download it (HTTP '+r.status+')');
   cur=normalize(JSON.parse(await r.text()));$('name').value=(u.split('/').pop()||'theme').replace(/\.json.*$/i,'').replace(/[^A-Za-z0-9_\- ]/g,'_').slice(0,32);
   panel();overlay();schedule();say('imported from the link: check the preview, then Save')}catch(e){say('could not read a theme from that link')}}
-const PANELS={Colors:panelColors,Effects:panelEffects,Text:panelText,Elements:panelElements,Moods:panelMoods,Faces:panelFaces,JSON:panelJson};
+/* ---- the screen itself: layout, awards, settings (not part of a theme) ---- */
+let lay={rows:[],max:200},layStep=1;
+async function loadLayout(){try{lay=await(await fetch(base+'/api/layout')).json()}catch(e){}}
+/* Clicks apply at once to the local copy and go to the device one after another, so quick clicks add up instead of overwriting each other. */
+let layQ=Promise.resolve(),layPending=0;
+function nudge(key,dx,dy,abs){const r=lay.rows.find(x=>x.key===key);if(!r)return layQ;
+ if(abs){r.dx=dx;r.dy=dy}else{r.dx+=dx;r.dy+=dy}
+ const want=[r.dx,r.dy];layPending++;panel();
+ layQ=layQ.then(async()=>{let j={};try{j=await(await post('layout',{key,dx:want[0],dy:want[1]})).json()}catch(e){}
+  layPending--;if(!j.ok)say(j.error||'could not move it');
+  if(!layPending){if(j.ok)lay.rows=j.rows;else await loadLayout();panel();setTimeout(preview,500)}});
+ return layQ}
+function panelLayout(){const p=E('div');
+ p.append(E('p',{style:'color:var(--dim);margin:0 0 8px'},'Move things on the screen. Every element is nudged by the step you choose; the preview shows the result. This is not part of a theme: it stays the same for all themes. On the device itself you can do the same from the touch menu (Layout tab).'));
+ p.append(E('div',{class:'row'},field('step',select([[1,'1 px'],[5,'5 px'],[10,'10 px']],layStep,v=>{layStep=parseInt(v)})),
+  E('button',{class:'d',id:'layreset',onclick:async()=>{if(!confirm('Put everything back where it was?'))return;const j=await(await post('layout',{reset:true})).json();if(j.ok){lay.rows=j.rows;panel();setTimeout(preview,500)}}},'Reset all')));
+ const list=E('div',{class:'ent'});
+ for(const r of lay.rows){const moved=r.dx||r.dy;
+  list.append(E('div',{class:'erow'+(moved?' set':''),'data-key':r.key},E('span',{class:'ename'},r.key),
+   E('button',{class:'lx-',onclick:()=>nudge(r.key,-layStep,0)},'X -'),E('button',{class:'lx+',onclick:()=>nudge(r.key,layStep,0)},'X +'),
+   E('button',{class:'ly-',onclick:()=>nudge(r.key,0,-layStep)},'Y -'),E('button',{class:'ly+',onclick:()=>nudge(r.key,0,layStep)},'Y +'),
+   E('span',{class:'inh'},'x '+(r.dx>0?'+':'')+r.dx+'  y '+(r.dy>0?'+':'')+r.dy),
+   moved?E('button',{class:'x',onclick:()=>nudge(r.key,0,0,true)},'reset'):null))}
+ if(!lay.rows.length)list.append(E('p',{style:'color:var(--dim)'},'Nothing is on the screen yet.'));
+ p.append(list);return p}
+let awards={enabled:true,achievements:[]};
+async function loadAwards(){try{awards=await(await fetch(base+'/api/achievements')).json()}catch(e){}}
+function panelAwards(){const p=E('div');
+ if(!awards.enabled){p.append(E('p',{style:'color:var(--dim)'},'Achievements are switched off (Settings tab).'));return p}
+ const done=awards.achievements.filter(a=>a.unlocked!==null).length;
+ p.append(E('p',{style:'color:var(--dim);margin:0 0 8px'},done+' of '+awards.achievements.length+' unlocked. They also show on the device: touch menu, Awards tab.'));
+ for(const a of awards.achievements){const d=a.unlocked!==null;const pct=d?100:Math.round(100*Math.min(a.progress,a.goal)/a.goal);
+  p.append(E('div',{class:'tl award'+(d?' done':''),'data-id':a.id,style:d?'border-color:var(--acc)':''},
+   E('b',{},(d?'★ ':'')+a.name),E('span',{style:'color:var(--dim)'},'  '+a.desc),
+   E('div',{class:'gbar',style:'background:linear-gradient(90deg,var(--acc) '+pct+'%,var(--bg) '+pct+'%);height:8px;margin:6px 0 0'}),
+   E('small',{style:'color:var(--dim)'},d?'unlocked '+new Date(a.unlocked*1000).toLocaleDateString():Math.floor(Math.min(a.progress,a.goal))+' / '+a.goal)))}
+ return p}
+let cfg={settings:{},display:{dim:1,night:null,idle:null},limits:{}};
+async function loadSettings(){try{cfg=await(await fetch(base+'/api/settings')).json()}catch(e){}}
+async function saveSettings(){const j=await(await post('settings',{settings:cfg.settings,display:cfg.display})).json();
+ if(j.ok){cfg.settings=j.settings;cfg.display=j.display;say('settings saved')}else say(j.error||'could not save the settings')}
+function panelSettings(){const p=E('div'),s=cfg.settings,d=cfg.display;
+ const num=(v,cb,mn,mx,st)=>E('input',{type:'number',min:mn,max:mx,step:st||1,value:v,oninput:e=>{const x=parseFloat(e.target.value);if(!isNaN(x))cb(clamp(x,mn,mx))}});
+ p.append(E('h2',{},'Overheating'),E('div',{class:'row'},
+  check('switch the Pi off when it stays too hot',s.overheat_off,on=>{s.overheat_off=on;panel()}),
+  field('above (°C)',num(s.overheat_temp,v=>s.overheat_temp=v,70,95)),
+  field('for (seconds)',num(s.overheat_seconds,v=>s.overheat_seconds=v,10,600))),
+  E('p',{style:'color:var(--dim);margin:0'},'A warning with a countdown shows on the screen first, and a touch cancels it (then it stays quiet for 10 minutes).'));
+ p.append(E('h2',{},'Achievements'),check('keep track of achievements',s.achievements,on=>{s.achievements=on}));
+ p.append(E('h2',{},'Brightness'),E('div',{class:'row'},slider('brightness',[5,100,5],Math.round(d.dim*100),v=>{d.dim=v/100})));
+ const nightOn=!!d.night,idleOn=!!d.idle;
+ p.append(E('div',{class:'row'},check('night mode',nightOn,on=>{d.night=on?{from:'22:00',to:'07:00',dim:.3}:null;panel()}),
+  nightOn?[field('from',E('input',{type:'text',size:5,value:d.night.from,oninput:e=>d.night.from=e.target.value})),
+   field('to',E('input',{type:'text',size:5,value:d.night.to,oninput:e=>d.night.to=e.target.value})),
+   slider('dim to',[5,100,5],Math.round(d.night.dim*100),v=>{d.night.dim=v/100})]:null));
+ p.append(E('div',{class:'row'},check('dim when not touched',idleOn,on=>{d.idle=on?{minutes:5,dim:.25}:null;panel()}),
+  idleOn?[field('after (minutes)',num(d.idle.minutes,v=>d.idle.minutes=v,1,240)),slider('dim to',[5,100,5],Math.round(d.idle.dim*100),v=>{d.idle.dim=v/100})]:null));
+ p.append(E('div',{class:'row'},E('button',{id:'setsave',onclick:saveSettings},'Save settings')));
+ return p}
+const PANELS={Colors:panelColors,Effects:panelEffects,Text:panelText,Elements:panelElements,Moods:panelMoods,Faces:panelFaces,JSON:panelJson,Layout:panelLayout,Awards:panelAwards,Settings:panelSettings};
 function panel(){const p=$('panel');p.innerHTML='';p.append(PANELS[tab]());
- const t=$('tabs');t.innerHTML='';for(const n of TABS)t.append(E('button',{class:n===tab?'on':'',onclick:async()=>{tab=n;pickKey=null;$('pick').innerHTML='';$('pick').className='';pvMood=n==='Moods'?mood:null;if(n==='Elements'||n==='Moods'){try{info.entities=await(await fetch(base+'/api/entities')).json()}catch(e){}}panel();overlay();schedule()}},n))}
+ const t=$('tabs');t.innerHTML='';for(const n of TABS)t.append(E('button',{class:n===tab?'on':'',onclick:async()=>{tab=n;pickKey=null;$('pick').innerHTML='';$('pick').className='';pvMood=n==='Moods'?mood:null;if(n==='Elements'||n==='Moods'){try{info.entities=await(await fetch(base+'/api/entities')).json()}catch(e){}}if(n==='Layout')await loadLayout();if(n==='Awards')await loadAwards();if(n==='Settings')await loadSettings();panel();overlay();schedule()}},n))}
 
 /* ---- drag text lines on the preview ---- */
 const est=t=>(t||'').replace(/\{time\}/g,'00:00:00').replace(/\{date\}/g,'0000-00-00').replace(/\{\w+\}/g,'0000').length;
@@ -2831,6 +3551,35 @@ if __name__ == "__main__":
         os.makedirs(THEME_DIR, exist_ok=True)
         write_json(DISPLAY_FILE, cfg)
         print(json.dumps(cfg))
+    elif cmd == "overheat":
+        try:
+            if len(a) not in (2, 3, 4) or a[1] not in ("on", "off"):
+                raise ValueError("usage: overheat on|off [TEMPERATURE [SECONDS]]")
+            cfg = clean_settings(json.load(open(SETTINGS_FILE))) if os.path.exists(SETTINGS_FILE) else clean_settings({})
+            cfg["overheat_off"] = a[1] == "on"
+            if len(a) >= 3:
+                cfg["overheat_temp"] = float(a[2])
+            if len(a) == 4:
+                cfg["overheat_seconds"] = float(a[3])
+            cfg = clean_settings(cfg)
+        except ValueError as e:
+            sys.exit("cannot set overheat: %s" % e)
+        os.makedirs(THEME_DIR, exist_ok=True)
+        write_json(SETTINGS_FILE, cfg)
+        print(json.dumps(cfg))
+    elif cmd == "achievements" and len(a) == 2 and a[1] in ("on", "off"):
+        cfg = clean_settings(json.load(open(SETTINGS_FILE))) if os.path.exists(SETTINGS_FILE) else clean_settings({})
+        cfg["achievements"] = a[1] == "on"
+        os.makedirs(THEME_DIR, exist_ok=True)
+        write_json(SETTINGS_FILE, cfg)
+        print(json.dumps(cfg))
+    elif cmd == "layout" and len(a) == 2 and a[1] in ("show", "reset"):
+        if a[1] == "reset":
+            write_json(LAYOUT_FILE, {"offsets": {}})
+        try:
+            print(json.dumps(clean_layout(json.load(open(LAYOUT_FILE)))))
+        except (OSError, ValueError):
+            print("{}")
     elif cmd == "validate" and len(a) == 2:
         try:
             t = _clean(json.load(open(a[1])))

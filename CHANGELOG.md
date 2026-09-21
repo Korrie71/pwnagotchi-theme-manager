@@ -1,5 +1,27 @@
 # Changelog
 
+## 2.3.0
+
+**New themes** (14 new ones, 27 built in): `startrek` (with a `{stardate}` placeholder), the seasons `spring`, `summer`,
+`autumn`, `winter`, the landscapes `mountain`, `ocean`, `forest`, `desert`, `aurora`, `volcano`, and `halloween`,
+`christmas` and `space`. `blood` got a brighter accent so its bars are readable.
+
+**Achievements.** 21 of them (handshakes, cracked passwords, running time, days used, themes tried, night owl, swiping,
+moving things, the heat guard, face uploads, backups), a message when one unlocks, an **Awards** tab in the touch menu and
+in the editor. A first run starts from what is already on the device. Off switch in Settings or `achievements off`.
+
+**Overheating auto-off** (optional). Above a temperature you choose for a time you choose, a countdown shows on the screen
+and the Pi shuts down unless you touch it. `Hot-off` button on the System tab, Settings tab, or `overheat on 85 60`.
+
+**Move things on the screen.** A **Layout** tab in the touch menu: tap an element and a box and a small popup with
+`X -` `X +` `Y -` `Y +` (1, 5 or 10 pixel steps), `reset` and `done` appear. The web editor has a Layout tab too, and
+`layout show|reset` works on the command line. Moves are saved in `layout.json` and apply to every theme.
+
+**Web editor:** new Layout, Awards and Settings tabs (overheating auto-off, achievements, brightness, night mode and idle
+dimming).
+
+**Under the hood:** the page counter in the menu now sits on the `>` button; a Flask-based API test; 500+ automated checks.
+
 ## 2.2.0
 
 **On the screen**

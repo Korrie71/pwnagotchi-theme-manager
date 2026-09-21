@@ -20,7 +20,7 @@ jobs:
         run: |
           sudo apt-get update
           sudo apt-get install -y fonts-dejavu-core
-          python -m pip install --upgrade pip numpy pillow
+          python -m pip install --upgrade pip numpy pillow flask
       - name: Syntax check
         run: |
           python -m py_compile theme_manager.py tools/*.py tests/*.py

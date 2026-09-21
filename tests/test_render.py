@@ -34,6 +34,26 @@ for name, th in everything.items():
     for mood in T.MOODS:
         T.colorize(canvas, T.resolve(th, mood), 1.7)
 ok("all %d built-in and example themes render at many times and in every mood" % len(everything), True)
+def _lum(c):
+    ch = [v / 255 for v in T._hex(c)]
+    f = lambda v: v / 12.92 if v <= 0.03928 else ((v + 0.055) / 1.055) ** 2.4  # noqa: E731
+    return 0.2126 * f(ch[0]) + 0.7152 * f(ch[1]) + 0.0722 * f(ch[2])
+
+
+def _contrast(a, b):
+    hi, lo = sorted((_lum(a), _lum(b)), reverse=True)
+    return (hi + 0.05) / (lo + 0.05)
+
+
+hard = []
+for name, th in T.BUILTIN.items():
+    c = T._clean(th)
+    backs = [c["gradient"]["from"], c["gradient"]["to"]] if c.get("gradient") else [c["bg"]]
+    if min(_contrast(c["fg"], b) for b in backs) < 4.5:
+        hard.append((name, "text"))
+    if min(_contrast(c["accent"], b) for b in backs) < 3.0:
+        hard.append((name, "bars"))
+ok("every built-in theme is readable (text contrast 4.5+, bars 3+)", not hard, hard)
 ok("frame_interval is sane for every theme", all(0.03 <= T.frame_interval(th, 1.0) <= 2.5 for th in everything.values()))
 ok("static themes are not animated, animated ones are",
    not T.is_animated(everything["default"]) and T.is_animated(everything["matrix"]))

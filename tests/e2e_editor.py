@@ -189,6 +189,64 @@ with sync_playwright() as p:
     page.click("#del")
     page.wait_for_function("!document.querySelector(\".card[data-name='zz-e2e-flow']\")", timeout=8000)
     check("delete works", True)
+    # ---------------------------------------------------------------- layout, awards and settings
+    s0 = requests.Session()
+    tok0 = re.search(r'name="csrf_token" content="([^"]+)"', s0.get(URL).text).group(1)
+    s0.post(URL + "api/layout", data=json.dumps({"reset": True}), headers={"X-CSRFToken": tok0, "Content-Type": "application/json"})
+    tab("Layout")
+    page.wait_for_selector(".erow[data-key='name']")
+    check("the Layout tab lists the elements that are on the screen", page.locator(".erow").count() >= 5 and all(page.locator(".erow[data-key='%s']" % k).count() for k in ("name", "face", "status")))
+    page.locator(".erow[data-key='name'] .lx\\+").click()
+    page.locator(".erow[data-key='name'] .ly\\+").click()
+    page.wait_for_function("document.querySelector(\".erow[data-key='name'] .x\")")
+    for _ in range(25):
+        rows = {r["key"]: r for r in requests.get(URL + "api/layout").json()["rows"]}
+        if (rows["name"]["dx"], rows["name"]["dy"]) == (1, 1):
+            break
+        page.wait_for_timeout(200)
+    check("two quick clicks (X+ then Y+) both count, and it is saved", (rows["name"]["dx"], rows["name"]["dy"]) == (1, 1), rows["name"])
+    page.select_option(".row select", "10")
+    page.locator(".erow[data-key='name'] .lx-").click()
+    page.wait_for_function("document.querySelector(\".erow[data-key='name'] .inh\").textContent.includes('x -9')")
+    check("the step can be 10 pixels", True)
+    page.locator(".erow[data-key='name'] .x").click()
+    page.wait_for_function("!document.querySelector(\".erow[data-key='name'] .x\")||document.querySelector(\".erow[data-key='name']:not(.set)\")")
+    for _ in range(25):
+        rows = {r["key"]: r for r in requests.get(URL + "api/layout").json()["rows"]}
+        if (rows["name"]["dx"], rows["name"]["dy"]) == (0, 0):
+            break
+        page.wait_for_timeout(200)
+    check("the reset button puts that element back", (rows["name"]["dx"], rows["name"]["dy"]) == (0, 0))
+    page.locator(".erow[data-key='name'] .lx\\+").click()
+    page.click("#layreset")
+    page.wait_for_function("!document.querySelector('.erow.set')")
+    check("Reset all clears every move", all(r["dx"] == 0 and r["dy"] == 0 for r in requests.get(URL + "api/layout").json()["rows"]))
+
+    tab("Awards")
+    page.wait_for_selector(".award")
+    check("the Awards tab lists every achievement with its progress", page.locator(".award").count() >= 20 and page.locator(".award.done").count() >= 1)
+
+    settings0 = requests.get(URL + "api/settings").json()
+    tab("Settings")
+    page.wait_for_selector("#setsave")
+    page.locator("label.ck:has-text('switch the Pi off') input").check()
+    page.locator("label:has-text('above') input").fill("90")
+    page.locator("label:has-text('for (seconds)') input").fill("120")
+    page.locator("label.ck:has-text('night mode') input").check()
+    page.click("#setsave")
+    wait_msg("settings saved")
+    now = requests.get(URL + "api/settings").json()
+    check("Settings: the overheating switch, temperature and time are saved", now["settings"]["overheat_off"] is True and now["settings"]["overheat_temp"] == 90 and now["settings"]["overheat_seconds"] == 120, now["settings"])
+    check("Settings: night mode gets a sensible default window", now["display"]["night"] and now["display"]["night"]["from"] == "22:00")
+    tab("Colors")
+    tab("Settings")
+    check("...and the tab shows what is saved when it is opened again", page.locator("label.ck:has-text('switch the Pi off') input").is_checked())
+    s2 = requests.Session()
+    tok2 = re.search(r'name="csrf_token" content="([^"]+)"', s2.get(URL).text).group(1)
+    s2.post(URL + "api/settings", data=json.dumps({"settings": settings0["settings"], "display": settings0["display"]}),
+            headers={"X-CSRFToken": tok2, "Content-Type": "application/json"})
+    check("the original settings are restored", requests.get(URL + "api/settings").json()["settings"] == settings0["settings"])
+
     phone = browser.new_context(viewport={"width": 375, "height": 800}, has_touch=True).new_page()
     phone.goto(URL)
     phone.wait_for_selector(".card")

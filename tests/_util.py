@@ -36,16 +36,15 @@ def finish():
 
 
 def sandbox():
-    """Point every path the plugin uses at a fresh temp folder, so tests never touch a real system."""
+    """Point every path the plugin uses at a fresh temp folder, so tests never touch a real system.
+    Every upper-case setting that lives under the themes folder (present or added later) is redirected."""
     d = tempfile.mkdtemp(prefix="tm-test-")
-    T.THEME_DIR = d
-    T.ACTIVE_FILE = os.path.join(d, "active.json")
-    T.FORCE_FILE = os.path.join(d, "force_mood.json")
-    T.TOUCH_FILE = os.path.join(d, "touch.json")
-    T.DISPLAY_FILE = os.path.join(d, "display.json")
-    T.FACES_DIR = os.path.join(d, "faces")
-    T.DOCS_FILE = os.path.join(d, "README.md")
-    os.makedirs(T.FACES_DIR)
+    old = T.THEME_DIR
+    for name in dir(T):
+        value = getattr(T, name)
+        if name.isupper() and isinstance(value, str) and (value == old or value.startswith(old + os.sep)):
+            setattr(T, name, d + value[len(old):])
+    os.makedirs(T.FACES_DIR, exist_ok=True)
     return d
 
 

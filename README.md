@@ -26,6 +26,7 @@ with pwnagotchi's mood. Themes are small JSON files you can edit in a web editor
 
 ## Features
 
+- **27 built-in themes**, from a Star Trek console to the four seasons, mountains, ocean, desert, aurora and more
 - **Colors and gradients** for ink, background and the top/bottom bars
 - **Effects:** glow, scanlines, vignette, film grain, pulse, rainbow, glitch, matrix rain, twinkling stars, border
 - **Per-element colors:** face, name, status, stats and any plugin's on-screen items each get their own color
@@ -34,6 +35,9 @@ with pwnagotchi's mood. Themes are small JSON files you can edit in a web editor
 - **Face packs:** replace the text face with PNG or GIF images per mood, in color or tinted by the theme
 - **Web editor** with live preview: sliders, gradient picker, drag-to-place text, click a part of the preview to recolor it, import/export
 - **Touch menu:** double tap the screen to switch themes (or just swipe sideways), enable/disable pwnagotchi plugins on the fly, or see system status and restart/reboot/shut down
+- **Move anything on the screen:** tap an element in the touch menu and nudge it with small `+` and `-` buttons (or do it in the web editor)
+- **Achievements:** unlock them for handshakes, uptime, themes tried and more, on the screen and in the editor
+- **Overheating auto-off (optional):** a countdown on the screen, then the Pi shuts itself down; a touch cancels it
 - **Night mode:** dim the screen by hand, on a schedule, or after a few minutes without a touch
 - **Warnings:** a banner on the screen for low power and high temperature
 - **Safe experiments:** try a theme for 30 seconds, then it goes back by itself; back up, restore, share and import themes and face packs from the editor
@@ -46,6 +50,10 @@ regenerate the images with `python tools/make_screenshots.py`.
 
 ![Some of the built-in themes](docs/images/themes.png)
 
+And more: a Star Trek console, the seasons, landscapes and holidays.
+
+![More built-in themes](docs/images/themes-more.png)
+
 **Mood-reactive themes** change colors and effects with pwnagotchi's face:
 
 ![One theme in six moods](docs/images/moods.png)
@@ -54,12 +62,17 @@ regenerate the images with `python tools/make_screenshots.py`.
 
 ![Two face packs](docs/images/faces.png)
 
-**Touch menu** (double tap the screen): themes, plugins and system:
+**Touch menu** (double tap the screen): themes, plugins, system, awards and layout:
 
 <p>
 <img src="docs/images/menu-themes.png" width="32%" alt="Themes tab">
 <img src="docs/images/menu-plugins.png" width="32%" alt="Plugins tab">
 <img src="docs/images/menu-system.png" width="32%" alt="System tab">
+</p>
+<p>
+<img src="docs/images/menu-awards.png" width="32%" alt="Awards tab">
+<img src="docs/images/menu-layout.png" width="32%" alt="Layout tab">
+<img src="docs/images/menu-adjust.png" width="32%" alt="Moving the face with the X and Y buttons">
 </p>
 
 **Web editor** with a live preview: drag text lines on the preview, or click a part of the screen to recolor it.
@@ -109,6 +122,8 @@ enabled = true
 
 **Web editor:** open `http://<pi-address>:8080/plugins/theme_manager/`. Pick a theme, change colors and effects, drag text
 lines on the preview, click a part of the screen to recolor it, then **Apply to screen**. Themes you save appear in the list.
+The **Layout**, **Awards** and **Settings** tabs (overheating auto-off, achievements, brightness and night mode) are about
+the device rather than the theme.
 
 **Command line** (use pwnagotchi's Python):
 
@@ -119,6 +134,9 @@ $P set matrix            # switch theme (applies within seconds)
 $P new mytheme           # create a template to edit
 $P validate FILE.json    # check a theme file
 $P mood sad 20           # preview a mood for 20 seconds
+$P overheat on 85 60     # turn the Pi off after 60 s at 85 C (or: overheat off)
+$P achievements off      # stop keeping track of achievements (or: on)
+$P layout show           # what was moved on the screen (or: layout reset)
 ```
 
 **Touch menu:** double tap the screen (two quick taps in about the same place). The first time you are asked to tap four
@@ -128,7 +146,9 @@ $P mood sad 20           # preview a mood for 20 seconds
 |---|---|
 | **Themes** | switch theme with one tap |
 | **Plugins** | every installed plugin with an `ON`/`OFF` switch that takes effect immediately and is saved to `config.toml`; a plugin that fails to load shows `ERR` and is set back to disabled |
-| **System** | temperature, load, RAM, IP, GPS status, uptime, power state, handshake counts; `restart`, `reboot`, `shutdown` and AUTO/MANU mode buttons that each need a second tap to confirm; `refresh` redraws the whole screen to clear a glitchy panel; `dim` cycles the brightness |
+| **System** | temperature, load, RAM, IP, GPS status, uptime, power state, handshake counts; `restart`, `reboot`, `shutdown` and AUTO/MANU mode buttons that each need a second tap to confirm; `Hot-off` switches the overheating auto-off on and off; `refresh` redraws the whole screen to clear a glitchy panel; `dim` cycles the brightness |
+| **Awards** | the achievements with your progress; tap one to see what it asks for |
+| **Layout** | every element on the screen; tap one to move it with `X -` `X +` `Y -` `Y +` (1, 5 or 10 pixels per tap), `reset` and `done`; `clear` puts everything back |
 
 Swipe sideways on the bare screen to change theme. `close`, a tap outside the menu, or 20 seconds of nothing closes it. It costs nothing while idle: one thread sleeps until
 the screen is touched.
@@ -184,7 +204,7 @@ python tests/run_all.py            # or run any tests/test_*.py on its own
 ```
 
 They cover theme validation and rendering (including a fuzz test), per-element colors, moods, face packs, the touch
-menu and calibration, plugin switching, the System tab, the placeholders, the install script, and a scan that keeps
+menu and calibration, plugin switching, the System tab, achievements, the layout mover, the web API, the placeholders, the install script, and a scan that keeps
 personal data out of the repository. The tools in [`tools/`](tools) regenerate the screenshots and the demo GIF from
 made-up data. GitHub Actions runs the tests on every push.
 
