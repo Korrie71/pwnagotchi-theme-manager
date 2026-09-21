@@ -1,5 +1,18 @@
 # Changelog
 
+## 2.4.0
+
+**Themes with scenery.** A new `scene` effect paints a landscape behind the text: mountains with snow caps, a sunset
+sea, pine forests, dunes and cacti, northern lights, a volcano with lava, snowy hills, spring meadows, a beach with palms,
+autumn trees, a halloween moon, christmas pines, a ringed planet, a Star Trek console, a neon city, a vaporwave sun and
+grid, a blood moon and pixel hills. 19 of the built-in themes now have one (`mountain`, `ice`, `ocean`, `forest`,
+`desert`, `aurora`, `volcano`, `winter`, `spring`, `summer`, `autumn`, `halloween`, `christmas`, `space`, `startrek`,
+`cyberpunk`, `vaporwave`, `blood`, `gameboy`). Snow, waves, embers, leaves, fireflies, bats, aurora curtains and warp
+streaks move; a frame costs 3-6 ms (aurora 15 ms). Available in the web editor (Effects tab) and in your own themes.
+
+**Docs:** a [display setup guide](docs/DISPLAY-SETUP.md) for 3.5" ILI9486 screens, including installing a missing
+`tft35a.dtbo`.
+
 ## 2.3.0
 
 **New themes** (14 new ones, 27 built in): `startrek` (with a `{stardate}` placeholder), the seasons `spring`, `summer`,

@@ -75,7 +75,9 @@ NAME_RE = re.compile(r"^[A-Za-z0-9_\- ]{1,32}$")
 KEY_RE = re.compile(r"^[A-Za-z0-9_.\-]{1,40}$")
 
 EFFECTS = {"scanlines", "vignette", "glow", "noise", "pulse", "rainbow",
-           "glitch", "rain", "stars", "border"}
+           "glitch", "rain", "stars", "border", "scene"}
+SCENE_KINDS = ("mountains", "glacier", "ocean", "forest", "desert", "aurora", "volcano", "winter", "spring", "summer", "autumn",
+               "halloween", "christmas", "space", "startrek", "city", "vaporwave", "bloodmoon", "pixel")
 ANIMATED = {"pulse", "rainbow", "glitch", "rain", "stars", "noise"}
 LIVE_TOKENS = ("{time}", "{cpu}", "{temp}", "{mem}", "{uptime}", "{ip}", "{gps}", "{lat}", "{lon}", "{sats}",
                "{handshakes}", "{cracked}", "{session}", "{battery}", "{power}", "{mode}")
@@ -110,7 +112,7 @@ BUILTIN = {
               "text": [{"text": "VT-100  {date}", "x": 10, "y": 278, "size": 11}]},
     "cyberpunk": {"bg": "#0d0221", "fg": "#00f0ff", "accent": "#ff2a6d", "web": "#ff2a6d", "fps": 8,
                   "gradient": {"from": "#0d0221", "to": "#2a0845", "direction": "vertical"},
-                  "effects": [{"type": "glow", "radius": 3, "strength": 0.8}, {"type": "glitch", "interval": 5},
+                  "effects": [{"type": "scene", "kind": "city"}, {"type": "glow", "radius": 3, "strength": 0.8}, {"type": "glitch", "interval": 5},
                               {"type": "scanlines", "strength": 0.25}],
                   "elements": {"face": "#00f0ff", "name": "#ff2a6d", "status": "#fcee0a", "shakes": "#ff2a6d"},
                   "mood": {"sad": {"fg": "#5b7cff", "accent": "#3a4a9a", "elements": {"face": "#5b7cff"}},
@@ -122,18 +124,18 @@ BUILTIN = {
                             "size": 11, "scroll": True, "speed": 45, "width": 290, "color": "#fcee0a"}]},
     "vaporwave": {"bg": "#1a0b2e", "fg": "#ff71ce", "accent": "#01cdfe", "web": "#b967ff", "fps": 6,
                   "gradient": {"from": "#2b0f54", "to": "#4a1580", "direction": "vertical"},
-                  "effects": [{"type": "stars", "density": 0.4, "speed": 3}, {"type": "glow", "radius": 2, "strength": 0.6},
+                  "effects": [{"type": "scene", "kind": "vaporwave"}, {"type": "stars", "density": 0.4, "speed": 3}, {"type": "glow", "radius": 2, "strength": 0.6},
                               {"type": "border", "size": 2, "color": "#01cdfe"}],
                   "elements": {"face": "#01cdfe", "status": "#05ffa1", "name": "#fffb96"},
                   "text": [{"text": "A E S T H E T I C", "x": 10, "y": 278, "size": 12, "color": "#05ffa1"}]},
     "blood": {"bg": "#0a0000", "fg": "#ff2020", "accent": "#c01010", "web": "#ff2020", "fps": 6,
-              "effects": [{"type": "pulse", "speed": 3, "strength": 0.5}, {"type": "vignette", "strength": 0.8},
+              "effects": [{"type": "scene", "kind": "bloodmoon"}, {"type": "pulse", "speed": 3, "strength": 0.5}, {"type": "vignette", "strength": 0.8},
                           {"type": "glow", "radius": 3, "strength": 0.7}]},
     "ice": {"bg": "#04121f", "fg": "#9fe8ff", "accent": "#3a8fb7", "web": "#3a8fb7", "fps": 5,
             "gradient": {"from": "#04121f", "to": "#0a3350", "direction": "vertical"},
-            "effects": [{"type": "stars", "density": 0.6, "speed": 2}, {"type": "glow", "radius": 2, "strength": 0.5}]},
+            "effects": [{"type": "scene", "kind": "glacier"}, {"type": "stars", "density": 0.6, "speed": 2}, {"type": "glow", "radius": 2, "strength": 0.5}]},
     "gameboy": {"bg": "#9bbc0f", "fg": "#0f380f", "accent": "#306230", "web": "#306230",
-                "effects": [{"type": "scanlines", "strength": 0.12}, {"type": "border", "size": 3, "color": "#306230"}]},
+                "effects": [{"type": "scene", "kind": "pixel"}, {"type": "scanlines", "strength": 0.12}, {"type": "border", "size": 3, "color": "#306230"}]},
     "moody": {"bg": "#08080f", "fg": "#d8d8e8", "accent": "#6c6c88", "web": "#8a7bff", "fps": 8,
               "description": "colors follow pwnagotchi's mood",
               "elements": {"face": "#d8d8e8"},
@@ -174,7 +176,7 @@ BUILTIN = {
                  "description": "starship-console look: orange, lavender and blue on black, red alert when angry",
                  "elements": {"face": "#99ccff", "name": "#ffcc66", "status": "#ffcc99", "channel": "#9999ff", "aps": "#9999ff",
                               "uptime": "#cc6666", "shakes": "#ffcc66", "mode": "#cc99cc"},
-                 "effects": [{"type": "border", "size": 3, "color": "#ff9900"}, {"type": "glow", "radius": 2, "strength": 0.5},
+                 "effects": [{"type": "scene", "kind": "startrek"}, {"type": "border", "size": 3, "color": "#ff9900"}, {"type": "glow", "radius": 2, "strength": 0.5},
                              {"type": "scanlines", "strength": 0.12}],
                  "text": [{"text": "STARDATE {stardate}", "x": 10, "y": 262, "size": 12, "bold": True, "color": "#cc99cc"},
                           {"text": "ALL SYSTEMS NOMINAL ::: SCANNING ::: STANDING BY ::: ", "x": 10, "y": 278, "size": 11,
@@ -189,77 +191,77 @@ BUILTIN = {
                "description": "fresh green with drifting blossoms",
                "gradient": {"from": "#0f2a1c", "to": "#2f6b4a", "direction": "vertical"},
                "elements": {"face": "#ffd6e8", "name": "#b8f5a0"},
-               "effects": [{"type": "stars", "density": 0.8, "speed": 1.5, "color": "#ffb7d5"}, {"type": "glow", "radius": 2, "strength": 0.4}],
+               "effects": [{"type": "scene", "kind": "spring"}, {"type": "glow", "radius": 2, "strength": 0.4}],
                "text": [{"text": "spring  {date}", "x": 10, "y": 278, "size": 11, "color": "#ffb7d5"}],
                "mood": {"happy": {"elements": {"face": "#fff2a8"}}, "sad": {"fg": "#cfe8ff", "elements": {"face": "#cfe8ff"}}}},
     "summer": {"bg": "#0b3d91", "fg": "#fff3c4", "accent": "#ffb703", "web": "#ffb703", "fps": 4,
                "description": "deep blue sky and sea with sun sparkles",
                "gradient": {"from": "#0b3d91", "to": "#006d77", "direction": "vertical"},
                "elements": {"face": "#fff3c4", "name": "#ffe066", "status": "#ffffff"},
-               "effects": [{"type": "stars", "density": 0.5, "speed": 3, "color": "#ffe066"}, {"type": "glow", "radius": 3, "strength": 0.6}],
+               "effects": [{"type": "scene", "kind": "summer"}, {"type": "glow", "radius": 3, "strength": 0.6}],
                "text": [{"text": "summer  {time}", "x": 10, "y": 278, "size": 11, "color": "#ffe066"}],
                "mood": {"excited": {"elements": {"face": "rainbow"}}, "sad": {"fg": "#d7ecff", "elements": {"face": "#d7ecff"}}}},
     "autumn": {"bg": "#2a1206", "fg": "#ffcf8a", "accent": "#e07a1f", "web": "#e07a1f", "fps": 4,
                "description": "warm browns and falling embers",
                "gradient": {"from": "#2a1206", "to": "#5c2a0a", "direction": "vertical"},
                "elements": {"face": "#ffb347", "name": "#ffd9a0"},
-               "effects": [{"type": "stars", "density": 0.7, "speed": 2, "color": "#ff8c1a"}, {"type": "vignette", "strength": 0.5}],
+               "effects": [{"type": "scene", "kind": "autumn"}, {"type": "stars", "density": 0.7, "speed": 2, "color": "#ff8c1a"}, {"type": "vignette", "strength": 0.5}],
                "text": [{"text": "autumn  {date}", "x": 10, "y": 278, "size": 11, "color": "#ff9a3d"}],
                "mood": {"angry": {"fg": "#ff6b3d", "elements": {"face": "#ff6b3d"}}}},
     "winter": {"bg": "#04121f", "fg": "#eaf6ff", "accent": "#9fd3f0", "web": "#9fd3f0", "fps": 4,
                "description": "cold blue night with falling snow",
                "gradient": {"from": "#04121f", "to": "#12466b", "direction": "vertical"},
                "elements": {"face": "#d7f0ff", "name": "#9fd3f0"},
-               "effects": [{"type": "stars", "density": 1.0, "speed": 1, "color": "#ffffff"}, {"type": "vignette", "strength": 0.3}],
+               "effects": [{"type": "scene", "kind": "winter"}, {"type": "stars", "density": 1.0, "speed": 1, "color": "#ffffff"}, {"type": "vignette", "strength": 0.3}],
                "text": [{"text": "winter  {date}", "x": 10, "y": 278, "size": 11, "color": "#9fd3f0"}],
                "mood": {"sad": {"fg": "#8fb3d9", "elements": {"face": "#8fb3d9"}}, "happy": {"elements": {"face": "#fff6c9"}}}},
     "mountain": {"bg": "#0d1b2e", "fg": "#f0f6ff", "accent": "#8fb3d9", "web": "#8fb3d9", "fps": 3,
                  "description": "dusk over snowy peaks",
                  "gradient": {"from": "#0d1b2e", "to": "#2a4365", "direction": "vertical"},
                  "elements": {"face": "#dbe8f7", "name": "#ffd59e", "status": "#c5d8ee"},
-                 "effects": [{"type": "stars", "density": 0.3, "speed": 1.5, "color": "#ffffff"}, {"type": "vignette", "strength": 0.5}],
+                 "effects": [{"type": "scene", "kind": "mountains"}, {"type": "stars", "density": 0.3, "speed": 1.5, "color": "#ffffff"}, {"type": "vignette", "strength": 0.5}],
                  "text": [{"text": "\u25B2 {name}  {time}", "x": 10, "y": 278, "size": 12, "color": "#ffd59e"}],
                  "mood": {"sad": {"fg": "#a9b8c9", "elements": {"face": "#a9b8c9"}}, "excited": {"elements": {"face": "#ffd59e"}}}},
     "ocean": {"bg": "#00132b", "fg": "#caf0f8", "accent": "#48cae4", "web": "#48cae4", "fps": 4,
               "description": "deep water with drifting plankton",
               "gradient": {"from": "#00132b", "to": "#005f73", "direction": "vertical"},
               "elements": {"face": "#90e0ef", "name": "#caf0f8"},
-              "effects": [{"type": "stars", "density": 0.5, "speed": 2, "color": "#90e0ef"}, {"type": "glow", "radius": 3, "strength": 0.6}],
+              "effects": [{"type": "scene", "kind": "ocean"}, {"type": "stars", "density": 0.5, "speed": 2, "color": "#90e0ef"}, {"type": "glow", "radius": 3, "strength": 0.6}],
               "text": [{"text": "depth  {uptime}", "x": 10, "y": 278, "size": 11, "color": "#48cae4"}],
               "mood": {"sad": {"fg": "#7aa5c4", "elements": {"face": "#7aa5c4"}}, "excited": {"elements": {"face": "rainbow"}}}},
     "forest": {"bg": "#06140b", "fg": "#c7f9cc", "accent": "#80ed99", "web": "#80ed99", "fps": 4,
                "description": "night woods with fireflies",
                "gradient": {"from": "#06140b", "to": "#123524", "direction": "vertical"},
                "elements": {"face": "#b7ffbf", "name": "#ffe66d"},
-               "effects": [{"type": "stars", "density": 0.35, "speed": 2.5, "color": "#ffe66d"}, {"type": "vignette", "strength": 0.5}],
+               "effects": [{"type": "scene", "kind": "forest"}, {"type": "stars", "density": 0.35, "speed": 2.5, "color": "#ffe66d"}, {"type": "vignette", "strength": 0.5}],
                "text": [{"text": "{name} in the woods", "x": 10, "y": 278, "size": 11, "color": "#80ed99"}],
                "mood": {"angry": {"fg": "#ff8a5c", "elements": {"face": "#ff8a5c"}}}},
     "desert": {"bg": "#2b0f3a", "fg": "#ffe8b5", "accent": "#ffb347", "web": "#ffb347", "fps": 3,
                "description": "purple dusk fading into orange sand",
                "gradient": {"from": "#2b0f3a", "to": "#a44a1f", "direction": "vertical"},
                "elements": {"face": "#fff1cf", "name": "#ffd18a"},
-               "effects": [{"type": "noise", "strength": 0.12}, {"type": "vignette", "strength": 0.45}],
+               "effects": [{"type": "scene", "kind": "desert"}, {"type": "noise", "strength": 0.12}, {"type": "vignette", "strength": 0.45}],
                "text": [{"text": "{date}  {temp}", "x": 10, "y": 278, "size": 11, "color": "#ffd18a"}],
                "mood": {"sad": {"fg": "#e8c9a0", "elements": {"face": "#e8c9a0"}}}},
     "aurora": {"bg": "#020c14", "fg": "#7dffb2", "accent": "#b18cff", "web": "#b18cff", "fps": 6,
                "description": "northern lights: green and violet glow on a dark sky",
                "gradient": {"from": "#020c14", "to": "#0b3a3a", "direction": "vertical"},
                "elements": {"face": "#7dffb2", "name": "#b18cff", "status": "#c8ffe0"},
-               "effects": [{"type": "glow", "radius": 3, "strength": 0.8}, {"type": "pulse", "speed": 1.5, "strength": 0.25},
+               "effects": [{"type": "scene", "kind": "aurora"}, {"type": "glow", "radius": 3, "strength": 0.8}, {"type": "pulse", "speed": 1.5, "strength": 0.25},
                            {"type": "stars", "density": 0.4, "speed": 2, "color": "#ffffff"}],
                "mood": {"excited": {"elements": {"face": "rainbow"}}, "sad": {"fg": "#8fa8ff", "elements": {"face": "#8fa8ff"}}}},
     "volcano": {"bg": "#0a0000", "fg": "#ff8a3d", "accent": "#ff3d00", "web": "#ff3d00", "fps": 6,
                 "description": "black rock with a glowing orange heart",
                 "gradient": {"from": "#0a0000", "to": "#4a0d00", "direction": "vertical"},
                 "elements": {"face": "#ffb347", "name": "#ff3d00"},
-                "effects": [{"type": "pulse", "speed": 2, "strength": 0.35}, {"type": "noise", "strength": 0.2},
+                "effects": [{"type": "scene", "kind": "volcano"}, {"type": "pulse", "speed": 2, "strength": 0.35}, {"type": "noise", "strength": 0.2},
                             {"type": "glow", "radius": 3, "strength": 0.7}],
                 "mood": {"angry": {"elements": {"face": "#ff2200"}, "effects": [{"type": "glitch", "interval": 2}]}}},
     "halloween": {"bg": "#12001f", "fg": "#ff9a1f", "accent": "#b04bff", "web": "#b04bff", "fps": 6,
                   "description": "orange and purple with a flickering glow",
                   "gradient": {"from": "#12001f", "to": "#2b0a3d", "direction": "vertical"},
                   "elements": {"face": "#ffb347", "name": "#d9a0ff"},
-                  "effects": [{"type": "pulse", "speed": 3, "strength": 0.3}, {"type": "stars", "density": 0.3, "speed": 2, "color": "#ff9a1f"},
+                  "effects": [{"type": "scene", "kind": "halloween"}, {"type": "pulse", "speed": 3, "strength": 0.3}, {"type": "stars", "density": 0.3, "speed": 2, "color": "#ff9a1f"},
                               {"type": "vignette", "strength": 0.6}],
                   "text": [{"text": "boo!  {time}", "x": 10, "y": 278, "size": 12, "bold": True, "color": "#ff9a1f"}],
                   "mood": {"excited": {"elements": {"face": "#7dff5a"}}}},
@@ -267,14 +269,14 @@ BUILTIN = {
                   "description": "red and green with falling snow",
                   "gradient": {"from": "#0a2a14", "to": "#3b0d0d", "direction": "vertical"},
                   "elements": {"face": "#ffffff", "name": "#80ed99", "status": "#ffd6d6"},
-                  "effects": [{"type": "stars", "density": 0.8, "speed": 1.5, "color": "#ffffff"}, {"type": "glow", "radius": 2, "strength": 0.5}],
+                  "effects": [{"type": "scene", "kind": "christmas"}, {"type": "stars", "density": 0.8, "speed": 1.5, "color": "#ffffff"}, {"type": "glow", "radius": 2, "strength": 0.5}],
                   "text": [{"text": "happy holidays  {date}", "x": 10, "y": 278, "size": 11, "color": "#ffd6d6"}],
                   "mood": {"excited": {"elements": {"face": "#ffe066"}}}},
     "space": {"bg": "#000005", "fg": "#cfd8ff", "accent": "#6c7bff", "web": "#6c7bff", "fps": 5,
               "description": "deep space with a slow star field",
               "gradient": {"from": "#000005", "to": "#0a0a26", "direction": "vertical"},
               "elements": {"face": "#e8ecff", "name": "#9aa8ff"},
-              "effects": [{"type": "stars", "density": 1.0, "speed": 2, "color": "#ffffff"}, {"type": "glow", "radius": 2, "strength": 0.4}],
+              "effects": [{"type": "scene", "kind": "space"}, {"type": "stars", "density": 1.0, "speed": 2, "color": "#ffffff"}, {"type": "glow", "radius": 2, "strength": 0.4}],
               "text": [{"text": "orbit {uptime}", "x": 10, "y": 278, "size": 11, "color": "#9aa8ff"}],
               "mood": {"excited": {"elements": {"face": "rainbow"}}, "angry": {"fg": "#ff6b6b", "elements": {"face": "#ff6b6b"}}}},
 }
@@ -314,6 +316,10 @@ def _clean_effect(e):
     if not isinstance(e, dict) or e.get("type") not in EFFECTS:
         raise ValueError("effect type must be one of: " + ", ".join(sorted(EFFECTS)))
     out = {"type": e["type"]}
+    if e["type"] == "scene":
+        if e.get("kind") not in SCENE_KINDS:
+            raise ValueError("scene.kind must be one of: " + ", ".join(SCENE_KINDS))
+        out["kind"] = e["kind"]
     for k, (lo, hi) in NUM_LIMITS.items():
         if k in e:
             out[k] = _num(e[k], lo, hi, "%s.%s" % (e["type"], k))
@@ -437,7 +443,7 @@ def _rainbow_elements(theme):
 def is_animated(theme):
     if _rainbow_elements(theme):
         return True
-    if any(e["type"] in ANIMATED for e in theme.get("effects", [])):
+    if any(e["type"] in ANIMATED or (e["type"] == "scene" and e["kind"] in ANIM_SCENES) for e in theme.get("effects", [])):
         return True
     for t in theme.get("text", []):
         if t.get("scroll") or any(tok in t["text"] for tok in LIVE_TOKENS):
@@ -739,6 +745,549 @@ def _stars(img, w, h, t, e, fg):
         d.rectangle((x, y, x + s, y + s), fill=tuple(int(under[j] + (color[j] - under[j]) * k) for j in range(3)))
 
 
+# ------------------------------------------------------------------ scenery
+# A "scene" effect paints a landscape behind the ink: mountains, sea, forest... The still part is drawn once (at double
+# size, then scaled down for smooth edges) and cached; a few scenes also have a light moving layer (snow, waves, embers).
+SS = 2
+
+
+class _Cv:
+    """A drawing surface at double size, starting from the theme's own background."""
+
+    def __init__(self, base):
+        self.w, self.h = base.size
+        self.im = base.resize((self.w * SS, self.h * SS), Image.BICUBIC)
+        self.d = ImageDraw.Draw(self.im)
+
+    def poly(self, pts, color):
+        self.d.polygon([(x * SS, y * SS) for x, y in pts], fill=color)
+
+    def circle(self, x, y, r, color):
+        self.d.ellipse(((x - r) * SS, (y - r) * SS, (x + r) * SS, (y + r) * SS), fill=color)
+
+    def rect(self, x0, y0, x1, y1, color):
+        self.d.rectangle((x0 * SS, y0 * SS, x1 * SS - 1, y1 * SS - 1), fill=color)
+
+    def line(self, pts, color, width=1):
+        self.d.line([(x * SS, y * SS) for x, y in pts], fill=color, width=max(1, int(width * SS)))
+
+    def glow(self, x, y, r, color, spread, peak=0.85):
+        """A soft light: full strength up to r, fading out over `spread` pixels."""
+        x0, y0 = int(max(0, (x - r - spread) * SS)), int(max(0, (y - r - spread) * SS))
+        x1, y1 = int(min(self.w * SS, (x + r + spread) * SS)), int(min(self.h * SS, (y + r + spread) * SS))
+        if x1 <= x0 or y1 <= y0:
+            return
+        reg = np.asarray(self.im.crop((x0, y0, x1, y1))).astype(np.float32)
+        yy, xx = np.mgrid[y0:y1, x0:x1]
+        dist = np.hypot(xx - x * SS, yy - y * SS) / SS
+        a = (np.clip(1 - (dist - r) / spread, 0, 1) ** 2 * peak)[..., None]
+        reg = reg * (1 - a) + np.array(color, np.float32) * a
+        self.im.paste(Image.fromarray(reg.astype(np.uint8), "RGB"), (x0, y0))
+
+    def out(self):
+        return self.im.resize((self.w, self.h), Image.LANCZOS)
+
+
+def _ridge(w, base, amp, seed, sharp=False, step=3):
+    """Points along a hilly (or, with sharp, peaked) skyline."""
+    rng = random.Random(seed)
+    comps = [(f, rng.uniform(0, 6.283), a) for f, a in ((0.011, 1.0), (0.027, 0.5), (0.061, 0.22), (0.13, 0.1))]
+    pts = []
+    for x in range(-step, w + 2 * step, step):
+        v = 0.0
+        for f, p, a in comps:
+            s = math.sin(x * f + p)
+            v += a * (1 - abs(s) * 2) if sharp else a * s
+        pts.append((x, base - amp * v / 1.8))
+    return pts
+
+
+def _ry(pts, x):
+    """Height of a skyline at x (the nearest sampled point)."""
+    return min(pts, key=lambda p: abs(p[0] - x))[1]
+
+
+def _under(c, pts, color, bottom=None):
+    bottom = c.h + 4 if bottom is None else bottom
+    c.poly(pts + [(pts[-1][0], bottom), (pts[0][0], bottom)], color)
+
+
+def _caps(c, pts, level, color):
+    """Snow on every part of a skyline that rises above `level` (one polygon per peak)."""
+    run = []
+    for x, y in pts + [(pts[-1][0] + 1, level + 1)]:
+        if y < level:
+            run.append((x, y))
+        elif run:
+            if len(run) > 1:
+                c.poly(run + [(px, y0 + (level - y0) * 0.85) for px, y0 in run[::-1]], color)
+            run = []
+
+
+def _tree(c, x, y, h, color, wide=0.38):
+    """A pine: stacked triangles standing on (x, y)."""
+    for i in range(3):
+        top = y - h + i * h * 0.26
+        half = h * wide * (0.55 + 0.25 * i)
+        c.poly([(x, top), (x - half, top + h * 0.42), (x + half, top + h * 0.42)], color)
+    c.rect(x - h * 0.05, y - h * 0.08, x + h * 0.05, y + 2, color)
+
+
+def _bare_tree(c, x, y, h, color, seed=1):
+    rng = random.Random(seed)
+    c.line([(x, y), (x, y - h)], color, 3)
+
+    def branch(bx, by, ang, ln, depth):
+        ex, ey = bx + math.cos(ang) * ln, by - math.sin(ang) * ln
+        c.line([(bx, by), (ex, ey)], color, max(1, depth * 0.8))
+        if depth > 1:
+            branch(ex, ey, ang + rng.uniform(0.3, 0.8), ln * 0.68, depth - 1)
+            branch(ex, ey, ang - rng.uniform(0.3, 0.8), ln * 0.68, depth - 1)
+    branch(x, y - h * 0.45, 1.9, h * 0.42, 4)
+    branch(x, y - h * 0.62, 1.2, h * 0.4, 4)
+    branch(x, y - h, 1.57, h * 0.3, 3)
+
+
+def _cloud(c, x, y, s, color):
+    for dx, dy, r in ((0, 0, 9), (11, -5, 12), (24, 0, 10), (12, 3, 10)):
+        c.circle(x + dx * s, y + dy * s, r * s, color)
+
+
+def _sun(c, x, y, r, color, halo, spread=60, peak=0.5):
+    c.glow(x, y, r, halo, spread, peak)
+    c.circle(x, y, r, color)
+
+
+def _scene_mountains(c, snow=(232, 240, 250)):
+    w, h = c.w, c.h
+    _sun(c, 388, 78, 22, (255, 246, 214), (255, 226, 160))
+    far = _ridge(w, 190, 78, 11, True)
+    _under(c, far, (74, 96, 132))
+    _caps(c, far, 138, snow)
+    mid = _ridge(w, 226, 58, 5, True)
+    _under(c, mid, (44, 62, 92))
+    _caps(c, mid, 186, (170, 190, 214))
+    near = _ridge(w, 268, 32, 23)
+    _under(c, near, (20, 30, 46))
+    for x in (46, 96, 330, 388, 440):
+        y = min(p[1] for p in near if abs(p[0] - x) < 4) + 3
+        _tree(c, x, y, 28 + (x % 3) * 5, (11, 20, 30))
+
+
+def _scene_glacier(c):
+    w = c.w
+    c.glow(120, 70, 8, (190, 235, 255), 90, 0.35)
+    far = _ridge(w, 200, 84, 4, True)
+    _under(c, far, (58, 116, 150))
+    _caps(c, far, 150, (236, 250, 255))
+    near = _ridge(w, 246, 56, 9, True)
+    _under(c, near, (30, 76, 108))
+    _caps(c, near, 205, (188, 226, 244))
+    ice = _ridge(w, 282, 14, 15)
+    _under(c, ice, (16, 44, 68))
+
+
+def _scene_ocean(c):
+    w, h = c.w, c.h
+    hor = 176
+    _sun(c, 330, hor - 6, 24, (255, 232, 176), (255, 196, 128), 90, 0.55)
+    c.rect(0, hor, w, h + 2, (6, 58, 92))
+    for i in range(9):   # a band of lighter water below the horizon, fading down
+        y = hor + i * 13
+        c.rect(0, y, w, y + 13, _mixc((8, 74, 112), (5, 40, 70), i / 9))
+    c.glow(330, hor + 40, 6, (255, 214, 150), 70, 0.22)
+    far = _ridge(w, hor + 2, 14, 3)
+    _under(c, [(x, min(y, hor + 1)) for x, y in far], (18, 46, 74), hor + 2)
+    c.rect(0, hor, w, hor + 1, (150, 200, 220))
+
+
+def _scene_forest(c):
+    w, h = c.w, c.h
+    c.glow(370, 70, 20, (200, 230, 200), 70, 0.4)
+    c.circle(370, 70, 20, (226, 244, 222))
+    back = _ridge(w, 214, 26, 8)
+    _under(c, back, (14, 52, 36))
+    for x in range(-10, w + 20, 21):
+        y = _ry(back, x) + 6
+        _tree(c, x, y, 40 + (x * 7) % 14, (12, 44, 30))
+    front = _ridge(w, 262, 16, 19)
+    _under(c, front, (8, 32, 22))
+    for x in range(8, w, 27):
+        y = _ry(front, x) + 8
+        _tree(c, x, y, 56 + (x * 11) % 22, (5, 22, 15))
+
+
+def _scene_desert(c):
+    w, h = c.w, c.h
+    _sun(c, 340, 168, 30, (255, 214, 140), (255, 160, 90), 110, 0.6)
+    _under(c, _ridge(w, 206, 16, 6), (150, 68, 46))
+    _under(c, _ridge(w, 238, 20, 2), (112, 48, 40))
+    near = _ridge(w, 276, 22, 12)
+    _under(c, near, (62, 26, 34))
+    for x, s in ((60, 1.0), (392, 1.25)):
+        y = _ry(near, x) + 6
+        col = (30, 12, 24)
+        c.rect(x - 3 * s, y - 42 * s, x + 3 * s, y, col)
+        c.rect(x - 14 * s, y - 28 * s, x - 9 * s, y - 14 * s, col)
+        c.rect(x - 14 * s, y - 16 * s, x - 3 * s, y - 12 * s, col)
+        c.rect(x + 9 * s, y - 34 * s, x + 14 * s, y - 20 * s, col)
+        c.rect(x + 3 * s, y - 22 * s, x + 14 * s, y - 18 * s, col)
+
+
+def _scene_aurora(c):
+    w = c.w
+    far = _ridge(w, 230, 46, 7, True)
+    _under(c, far, (8, 26, 34))
+    _caps(c, far, 200, (60, 100, 110))
+    _under(c, _ridge(w, 268, 20, 3), (3, 12, 18))
+
+
+def _scene_volcano(c):
+    w, h = c.w, c.h
+    c.glow(300, 140, 10, (255, 100, 30), 120, 0.45)
+    _under(c, _ridge(w, 240, 26, 3, True), (30, 10, 10))
+    c.poly([(140, 300), (258, 156), (300, 148), (342, 156), (460, 300)], (34, 12, 12))
+    c.d.ellipse((272 * SS, 141 * SS, 328 * SS, 158 * SS), fill=(255, 112, 32))
+    c.d.ellipse((282 * SS, 144 * SS, 318 * SS, 154 * SS), fill=(255, 190, 90))
+    for x0, sway, x1 in ((296, -8, 262), (304, 10, 340), (300, 2, 296)):
+        pts = [(x0 + sway * math.sin(i * 0.9) * (i / 9), 154 + i * 16.5) for i in range(9)]
+        pts[-1] = (x1, 300)
+        c.line(pts, (255, 96, 24), 2)
+        c.line(pts, (255, 170, 60), 1)
+    c.glow(300, 152, 4, (255, 140, 50), 50, 0.35)
+    _under(c, _ridge(w, 294, 9, 6), (14, 4, 4))
+
+
+def _scene_winter(c):
+    w, h = c.w, c.h
+    c.glow(416, 56, 16, (200, 220, 245), 60, 0.35)
+    c.circle(416, 56, 16, (232, 240, 252))
+    far = _ridge(w, 214, 30, 5)
+    _under(c, far, (58, 88, 128))
+    for x in range(30, w, 62):
+        y = _ry(far, x) + 4
+        _tree(c, x, y, 34 + (x % 3) * 6, (24, 60, 62))
+    near = _ridge(w, 262, 22, 9)
+    _under(c, near, (86, 114, 158))
+    for x in (60, 380, 430):
+        y = _ry(near, x) + 6
+        _tree(c, x, y, 52, (14, 44, 46))
+
+
+def _scene_spring(c):
+    w, h = c.w, c.h
+    _sun(c, 420, 62, 20, (255, 246, 190), (255, 240, 170), 60, 0.4)
+    for x, y, s in ((250, 150, 0.9), (330, 100, 1.0), (120, 170, 1.2)):
+        _cloud(c, x, y, s, (208, 232, 232))
+    _under(c, _ridge(w, 208, 24, 3), (54, 122, 84))
+    near = _ridge(w, 246, 20, 8)
+    _under(c, near, (34, 96, 62))
+    rng = random.Random(4)
+    for i in range(70):
+        x = rng.randrange(0, w)
+        y = _ry(near, x) + rng.randrange(6, 56)
+        c.circle(x, y, 1.6, rng.choice(((255, 158, 203), (255, 236, 130), (255, 255, 255), (198, 160, 255))))
+
+
+def _scene_summer(c):
+    w, h = c.w, c.h
+    hor = 190
+    for i in range(6):
+        c.rect(0, hor - 60 + i * 10, w, hor - 50 + i * 10, _mixc((250, 200, 90), (120, 200, 230), i / 6))
+    _sun(c, 250, hor - 4, 38, (255, 244, 170), (255, 224, 120), 120, 0.5)
+    c.rect(0, hor, w, h + 2, (18, 130, 158))
+    c.rect(0, hor, w, hor + 1, (210, 240, 245))
+    beach = _ridge(w, 284, 14, 5)
+    _under(c, beach, (150, 112, 66))
+    _under(c, _ridge(w, 300, 6, 2), (118, 84, 48))
+    for x, y, lean in ((72, 292, 1), (420, 290, -1)):   # two palms
+        c.line([(x, y), (x + 8 * lean, y - 48), (x + 4 * lean, y - 78)], (74, 44, 22), 4)
+        top = (x + 4 * lean, y - 78)
+        for ang in (0.3, 0.9, 1.6, 2.3, 2.9):
+            ex, ey = top[0] + math.cos(ang) * 30, top[1] - math.sin(ang) * 14 + 10
+            c.poly([top, (top[0] + math.cos(ang) * 16, top[1] - math.sin(ang) * 16 - 4), (ex, ey)], (24, 92, 58))
+
+
+def _scene_autumn(c):
+    w, h = c.w, c.h
+    _sun(c, 372, 150, 26, (255, 178, 84), (255, 130, 60), 100, 0.5)
+    _under(c, _ridge(w, 214, 26, 6), (108, 44, 20))
+    near = _ridge(w, 262, 18, 14)
+    _under(c, near, (58, 24, 12))
+    for x, h_ in ((70, 96), (150, 70), (410, 88)):
+        y = _ry(near, x) + 8
+        _bare_tree(c, x, y, h_, (30, 12, 6), seed=x)
+        rng = random.Random(x)
+        for _ in range(26):
+            c.circle(x + rng.uniform(-h_ * .42, h_ * .42), y - h_ * rng.uniform(.5, 1.05), 2.2, rng.choice(((214, 96, 24), (232, 150, 40), (176, 52, 20))))
+
+
+def _scene_halloween(c):
+    w, h = c.w, c.h
+    c.glow(420, 44, 30, (255, 168, 70), 90, 0.4)
+    c.circle(420, 44, 30, (255, 196, 96))
+    for dx, dy, r in ((-9, -7, 5), (7, 5, 7), (-3, 12, 4)):
+        c.circle(420 + dx, 44 + dy, r, (236, 168, 76))
+    _under(c, _ridge(w, 244, 20, 3), (38, 12, 54))
+    near = _ridge(w, 276, 14, 11)
+    _under(c, near, (16, 4, 26))
+    _bare_tree(c, 80, 286, 130, (10, 2, 16), seed=3)
+    for x in (300, 340, 390):
+        y = _ry(near, x) + 8
+        c.poly([(x - 6, y), (x - 6, y - 16), (x, y - 22), (x + 6, y - 16), (x + 6, y)], (30, 12, 44))
+
+
+def _scene_christmas(c):
+    w, h = c.w, c.h
+    c.circle(410, 60, 14, (250, 246, 220))
+    far = _ridge(w, 226, 22, 4)
+    _under(c, far, (24, 80, 52))
+    near = _ridge(w, 268, 16, 10)
+    _under(c, near, (120, 146, 168))
+    for x, hh in ((46, 88), (128, 64), (330, 76), (420, 96)):
+        y = _ry(near, x) + 6
+        _tree(c, x, y, hh, (14, 66, 40), 0.42)
+        c.poly([(x, y - hh - 8), (x - 4, y - hh + 2), (x + 4, y - hh + 2)], (255, 214, 90))
+
+
+def _scene_space(c):
+    w, h = c.w, c.h
+    for x, y, r, col in ((90, 240, 120, (58, 30, 110)), (400, 90, 90, (24, 52, 120)), (250, 150, 70, (86, 30, 90))):
+        c.glow(x, y, 0, col, r, 0.42)
+    px, py = 372, 200
+    c.glow(px, py, 44, (110, 130, 255), 34, 0.3)
+    c.circle(px, py, 44, (36, 40, 96))
+    c.circle(px - 8, py - 10, 34, (52, 60, 130))
+    c.circle(px - 18, py - 18, 18, (92, 108, 190))
+    c.d.arc(((px - 78) * SS, (py - 14) * SS, (px + 78) * SS, (py + 14) * SS), 0, 360, fill=(150, 160, 230), width=3 * SS)
+    c.circle(70, 120, 7, (150, 156, 200))
+
+
+def _scene_startrek(c):
+    w, h = c.w, c.h
+    bars = ((0, 24, (255, 153, 0)), (26, 60, (204, 153, 204)), (62, 110, (153, 153, 255)), (112, 150, (255, 204, 153)),
+            (152, 200, (204, 102, 102)), (202, 250, (255, 153, 0)), (252, 290, (153, 153, 204)))
+    for y0, y1, col in bars:
+        c.rect(0, 18 + y0 * 0.95, 7, 18 + y1 * 0.95, col)
+        c.rect(w - 7, 18 + y0 * 0.95, w, 18 + y1 * 0.95, col)
+    c.circle(300, 230, 46, (30, 30, 60))
+    c.circle(292, 222, 40, (46, 50, 100))
+    c.d.arc((232 * SS, 210 * SS, 368 * SS, 250 * SS), 190, 350, fill=(204, 153, 204), width=2 * SS)
+
+
+def _scene_city(c):
+    w, h = c.w, c.h
+    rng = random.Random(9)
+    for layer, (base, col, wins) in enumerate(((236, (26, 10, 60), (120, 40, 140)), (272, (12, 4, 34), (0, 200, 220)))):
+        x = 0
+        while x < w:
+            bw = rng.randrange(22, 46)
+            bh = rng.randrange(40, 120) if layer == 0 else rng.randrange(20, 76)
+            c.rect(x, base - bh, x + bw, h + 2, col)
+            for wy in range(int(base - bh + 6), base - 4, 9):
+                for wx in range(x + 4, x + bw - 4, 7):
+                    if rng.random() < 0.28:
+                        c.rect(wx, wy, wx + 3, wy + 4, wins)
+            x += bw + rng.randrange(0, 5)
+    c.rect(0, 282, w, h + 2, (8, 2, 24))
+    c.rect(0, 282, w, 283, (255, 42, 109))
+
+
+def _scene_vaporwave(c):
+    w, h = c.w, c.h
+    hor = 206
+    c.glow(240, hor - 20, 60, (255, 90, 190), 90, 0.5)
+    c.circle(240, hor - 20, 58, (255, 140, 120))
+    for i in range(7):    # stripes cut into the sun
+        y = hor - 40 + i * 9
+        c.rect(170, y, 310, y + 1.5 + i * 0.6, (43, 15, 84))
+    c.rect(0, hor, w, h + 2, (26, 8, 60))
+    c.rect(0, hor, w, hor + 1, (1, 205, 254))
+    for i in range(-12, 13):   # the floor grid's lines, fanning out from the horizon
+        c.line([(240 + i * 8, hor), (240 + i * 60, h)], (84, 30, 136), 1)
+
+
+def _scene_bloodmoon(c):
+    w, h = c.w, c.h
+    c.glow(370, 96, 44, (190, 20, 16), 120, 0.55)
+    c.circle(370, 96, 44, (206, 30, 24))
+    c.circle(358, 84, 40, (236, 56, 40))
+    _under(c, _ridge(w, 246, 26, 8, True), (62, 8, 10))
+    near = _ridge(w, 280, 12, 4)
+    _under(c, near, (28, 4, 4))
+    _bare_tree(c, 410, 284, 110, (8, 0, 0), seed=8)
+    for x in (60, 100, 140):
+        y = _ry(near, x) + 8
+        c.poly([(x - 5, y), (x - 5, y - 18), (x, y - 24), (x + 5, y - 18), (x + 5, y)], (22, 4, 4))
+
+
+def _scene_pixel(c):
+    """Hills and clouds in blocks, in the four greens of an old handheld."""
+    w, h = c.w, c.h
+    g0, g1, g2 = (155, 188, 15), (139, 172, 15), (48, 98, 48)
+    for x, y in ((60, 60), (240, 44), (380, 76)):
+        for dx, dy, ww in ((0, 8, 44), (8, 0, 28), (0, 16, 52)):
+            c.rect(x + dx, y + dy, x + dx + ww, y + dy + 8, g1)
+    for x in range(0, w, 8):
+        top = 226 - int(20 * math.sin(x * 0.02) + 12 * math.sin(x * 0.055 + 1))
+        c.rect(x, top - top % 8, x + 8, h, g1)
+    for x in range(0, w, 8):
+        top = 268 - int(10 * math.sin(x * 0.03 + 2))
+        c.rect(x, top - top % 8, x + 8, h, g2)
+
+
+SCENES = {"mountains": _scene_mountains, "glacier": _scene_glacier, "ocean": _scene_ocean, "forest": _scene_forest,
+          "desert": _scene_desert, "aurora": _scene_aurora, "volcano": _scene_volcano, "winter": _scene_winter,
+          "spring": _scene_spring, "summer": _scene_summer, "autumn": _scene_autumn, "halloween": _scene_halloween,
+          "christmas": _scene_christmas, "space": _scene_space, "startrek": _scene_startrek, "city": _scene_city,
+          "vaporwave": _scene_vaporwave, "bloodmoon": _scene_bloodmoon, "pixel": _scene_pixel}
+
+
+# ---- the moving layers (drawn at normal size onto the cached scene, every animation frame)
+def _blend_px(img, d, x, y, color, k, size=1):
+    x, y = int(x), int(y)
+    if 0 <= x < img.width - size and 0 <= y < img.height - size:
+        under = img.getpixel((x, y))
+        d.rectangle((x, y, x + size - 1, y + size - 1), fill=tuple(int(under[j] + (color[j] - under[j]) * k) for j in range(3)))
+
+
+def _particles(n, seed, w, h):
+    rng = random.Random(seed)
+    return _memo(("scene-pts", n, seed, w, h), (), lambda: [(rng.random() * w, rng.random() * h, rng.random()) for _ in range(n)])
+
+
+def _dyn_snow(img, d, w, h, t, sp, count=70, color=(240, 246, 255)):
+    for x, y, r in _particles(count, 5, w, h):
+        fall = 8 + 16 * r
+        yy = (y + t * fall * sp) % h
+        xx = x + math.sin(t * 0.7 * sp + r * 20) * 6
+        _blend_px(img, d, xx, yy, color, 0.55 + 0.4 * r, 2 if r > 0.7 else 1)
+
+
+def _dyn_waves(img, d, w, h, t, sp, top=178, color=(150, 205, 225)):
+    for i in range(8):
+        y0 = top + 8 + i * 15 + i * i
+        amp = 1 + i * 0.35
+        pts = [(x, y0 + math.sin(x * (0.03 - i * 0.002) + t * sp * (1.2 + i * 0.15) + i * 2) * amp) for x in range(0, w + 8, 8)]
+        col = _mixc(color, (10, 60, 90), i / 9)
+        d.line(pts, fill=col, width=1)
+
+
+def _dyn_embers(img, d, w, h, t, sp):
+    for x, y, r in _particles(36, 6, 60, 200):
+        yy = 150 - ((t * (10 + 20 * r) * sp + y) % 200)
+        xx = 300 + (x - 30) * (1 + (150 - yy) / 90) + math.sin(t * sp + r * 9) * 6
+        if 8 < yy < 160:
+            k = min(1.0, (yy - 8) / 60)
+            _blend_px(img, d, xx, yy, (255, 150 + int(90 * (1 - k)), 40), 0.9 * k, 2)
+    pulse = 0.5 + 0.5 * math.sin(t * sp * 1.5)
+    ov = Image.new("RGBA", (70, 30), (0, 0, 0, 0))
+    ImageDraw.Draw(ov).ellipse((10, 8, 60, 22), fill=(255, 200, 110, int(50 + 90 * pulse)))
+    ov = ov.filter(ImageFilter.GaussianBlur(4))
+    img.paste(ov, (300 - 35, 142 - 8), ov)
+
+
+def _dyn_leaves(img, d, w, h, t, sp):
+    for x, y, r in _particles(34, 7, w, h):
+        yy = (y + t * (12 + 14 * r) * sp) % h
+        xx = x + math.sin(t * 1.1 * sp + r * 30) * 14 + (t * 6 * sp)
+        _blend_px(img, d, xx % w, yy, ((214, 96, 24), (232, 150, 40), (176, 52, 20))[int(r * 3) % 3], 0.9, 3)
+
+
+def _dyn_fireflies(img, d, w, h, t, sp):
+    for x, y, r in _particles(26, 8, w, h * 0.45):
+        y += h * 0.5
+        b = max(0.0, math.sin(t * sp * 1.3 + r * 40))
+        _blend_px(img, d, x + math.sin(t * 0.5 * sp + r * 9) * 8, y + math.cos(t * 0.4 * sp + r * 7) * 6, (222, 255, 120), b * 0.9, 2)
+
+
+def _dyn_aurora(img, d, w, h, t, sp):
+    """Soft curtains of light, drawn at half size and blurred so they look like light and not stripes."""
+    hw, hh = w // 2, h // 2
+    ov = Image.new("RGBA", (hw, hh), (0, 0, 0, 0))
+    od = ImageDraw.Draw(ov)
+    for band, (col, y0) in enumerate((((50, 255, 140), 30), ((140, 90, 255), 44), ((50, 210, 200), 22))):
+        for x in range(0, hw, 2):
+            sway = math.sin(x * 0.034 + t * sp * 0.5 + band * 2) * 14 + math.sin(x * 0.09 - t * sp * 0.8) * 4
+            length = 42 + 20 * math.sin(x * 0.05 + t * sp * 0.3 + band)
+            for j in range(4):
+                a = int(62 * (1 - j / 4) * (0.6 + 0.4 * math.sin(x * 0.12 + band)))
+                od.line([(x, y0 + sway + j * length / 4), (x, y0 + sway + (j + 1) * length / 4)], fill=col + (a,), width=2)
+    ov = ov.filter(ImageFilter.GaussianBlur(1.6)).resize((w, h), Image.BILINEAR)
+    img.paste(ov, (0, 0), ov)
+
+
+def _dyn_warp(img, d, w, h, t, sp):
+    cx, cy = 240, 160
+    for x, y, r in _particles(34, 9, 1, 1):
+        ang = (x * 6.283) + r
+        p = (t * sp * 0.25 + y) % 1.0
+        r0, r1 = 20 + p * p * 300, 20 + min(1.0, p * 1.15) ** 2 * 300
+        k = 0.15 + 0.7 * p
+        col = tuple(int(c * k) for c in (200, 210, 255))
+        d.line([(cx + math.cos(ang) * r0, cy + math.sin(ang) * r0 * 0.7), (cx + math.cos(ang) * r1, cy + math.sin(ang) * r1 * 0.7)], fill=col, width=1)
+
+
+CHRISTMAS_TREES = ((46, 88), (128, 64), (330, 76), (420, 96))
+
+
+def _dyn_lights(img, d, w, h, t, sp):
+    cols = ((255, 60, 60), (255, 214, 90), (90, 200, 255), (120, 255, 140))
+    near = _memo(("xmas-ridge", w), (), lambda: _ridge(w, 268, 16, 10))
+    n = 0
+    for x, hh in CHRISTMAS_TREES:
+        base = _ry(near, x) + 6
+        for k in range(8):
+            y = base - hh * (k + 1.4) / 10.5
+            half = hh * 0.36 * (1 - k / 9.5)
+            xx = x + math.sin(k * 2.7 + x) * half
+            b = 0.5 + 0.5 * math.sin(t * sp * 2 + n * 1.9)
+            _blend_px(img, d, xx, y, cols[n % 4], 0.3 + 0.7 * b, 2)
+            n += 1
+
+
+def _dyn_bats(img, d, w, h, t, sp):
+    for i in range(3):
+        x = (t * (30 + i * 12) * sp + i * 170) % (w + 60) - 30
+        y = 60 + i * 34 + math.sin(t * 2 * sp + i) * 10
+        flap = math.sin(t * 9 * sp + i) * 4
+        d.line([(x - 9, y - flap), (x - 4, y - 2), (x, y), (x + 4, y - 2), (x + 9, y - flap)], fill=(12, 2, 20), width=2)
+
+
+def _dyn_grid(img, d, w, h, t, sp):
+    hor = 206
+    for i in range(8):     # the floor lines glide toward you
+        p = ((i + t * sp * 0.4) % 8) / 8
+        y = hor + (h - hor) * p * p
+        d.line([(0, y), (w, y)], fill=(110, 44, 170), width=1)
+
+
+DYNAMIC = {"winter": _dyn_snow, "glacier": lambda *a: _dyn_snow(*a, count=40), "christmas": lambda *a: (_dyn_snow(*a, count=60), _dyn_lights(*a)),
+           "mountains": lambda *a: _dyn_snow(*a, count=30), "ocean": _dyn_waves,
+           "summer": lambda *a: _dyn_waves(*a, top=190, color=(120, 200, 215)), "volcano": _dyn_embers, "autumn": _dyn_leaves,
+           "forest": _dyn_fireflies, "aurora": _dyn_aurora, "startrek": _dyn_warp, "halloween": _dyn_bats, "vaporwave": _dyn_grid}
+ANIM_SCENES = set(DYNAMIC)
+
+
+def _scene_still(theme, kind, w, h, strength):
+    def make():
+        base = _base(theme, w, h)
+        c = _Cv(base)
+        SCENES[kind](c)
+        out = c.out()
+        return Image.blend(base, out, strength) if strength < 1 else out
+    return _memo(("scene", id(theme), kind, w, h, strength), (theme,), make, cap=12)
+
+
+def _scene_apply(theme, e, w, h, t):
+    """The theme's background with its scenery painted in, ready for the rest of the effects."""
+    kind, strength = e["kind"], e.get("strength", 1.0)
+    img = _scene_still(theme, kind, w, h, strength).copy()
+    if kind in DYNAMIC:
+        DYNAMIC[kind](img, ImageDraw.Draw(img), w, h, t, e.get("speed", 3) / 3.0)
+    return img
+
+
 def _rainbow(w, h, t, e):
     def make():
         hue = (np.arange(2 * w) * 255 / w) % 256
@@ -805,7 +1354,7 @@ def colorize(canvas, theme, t=0.0, layers=None, face=None, bar_top=14, bar_botto
     fg, acc = _hex(theme["fg"]), _hex(theme["accent"])
     hide = layers.get("face") if (face and layers) else None
     mask, ink_region, bars = _layers(canvas, w, h, bar_top, bar_bottom, hide)
-    img = _base(theme, w, h)
+    img = _scene_apply(theme, fx["scene"], w, h, t) if "scene" in fx else _base(theme, w, h)
 
     if "stars" in fx:
         _stars(img, w, h, t, fx["stars"], fg)
@@ -1162,7 +1711,7 @@ def stale_tty_owner(proc="/proc"):
 def frame_interval(theme, t):
     """Seconds until the next animation frame is worth drawing."""
     fx = {e["type"]: e for e in theme.get("effects", [])}
-    if CONTINUOUS & fx.keys() or _rainbow_elements(theme) or any(l["scroll"] for l in theme.get("text", [])):
+    if CONTINUOUS & fx.keys() or ("scene" in fx and fx["scene"]["kind"] in ANIM_SCENES) or _rainbow_elements(theme) or any(l["scroll"] for l in theme.get("text", [])):
         iv = 1.0 / theme.get("fps", 5)
     else:
         iv = 1.0  # only live text (clock etc.) changes
@@ -1625,7 +2174,7 @@ def draw_toast(img, text, theme):
 
 class ThemeManager(plugins.Plugin):
     __author__ = "theme_manager contributors"
-    __version__ = "2.3.0"
+    __version__ = "2.4.0"
     __license__ = "GPL3"
     __description__ = "Theme engine for the 3.5 inch display: colors, effects, animations, custom text, web GUI."
 
@@ -3124,7 +3673,7 @@ class ThemeManager(plugins.Plugin):
             return jsonify({"ok": False, "error": "unknown endpoint"}), 404
 
         if path in ('', 'index.html'):
-            return render_template_string(PAGE)
+            return render_template_string(PAGE.replace("SCENE_KINDS_JS", json.dumps(list(SCENE_KINDS))))
         return Response('not found', status=404)
 
 
@@ -3206,7 +3755,9 @@ const E=(tag,props,...kids)=>{const e=document.createElement(tag);
 const FX={glow:{radius:[0,12,1,3],strength:[0,1,.05,.8]},scanlines:{strength:[0,1,.05,.35]},vignette:{strength:[0,1,.05,.6]},
  border:{size:[1,12,1,2],color:1},noise:{strength:[0,1,.05,.3]},pulse:{speed:[0,30,.5,3],strength:[0,1,.05,.5]},
  rainbow:{speed:[0,30,.5,2]},glitch:{interval:[.5,20,.5,4]},rain:{density:[.05,1,.05,.5],speed:[0,30,.5,8],color:1},
- stars:{density:[.05,1,.05,.5],speed:[0,30,.5,3],color:1}};
+ stars:{density:[.05,1,.05,.5],speed:[0,30,.5,3],color:1},
+ scene:{kind:'kind',strength:[0,1,.05,1],speed:[0,30,.5,3]}};
+const KINDS=SCENE_KINDS_JS;
 const ANIM=['pulse','rainbow','glitch','rain','stars','noise'];
 const MOODS=['look_r','sleep','awake','bored','intense','cool','happy','grateful','excited','motivated','demotivated','smart','lonely','sad','angry','friend','broken','debug','upload','handshake'];
 const HOLDERS=['{name}','{time}','{date}','{cpu}','{temp}','{mem}','{uptime}','{ip}','{mode}','{gps}','{lat}','{lon}','{sats}','{handshakes}','{cracked}','{session}','{power}','{battery}'];
@@ -3261,10 +3812,11 @@ const numIn=(v,cb,mn,mx)=>E('input',{type:'number',min:mn,max:mx,value:v,oninput
 function effectsEditor(getList){const box=E('div',{class:'fxbox'});
  for(const[type,params]of Object.entries(FX)){const have=getList().find(e=>e.type===type);
   box.append(check(type,!!have,on=>{const l=getList();
-   if(on){const o={type};for(const[k,d]of Object.entries(params))if(Array.isArray(d))o[k]=d[3];l.push(o)}
+   if(on){const o={type};for(const[k,d]of Object.entries(params)){if(Array.isArray(d))o[k]=d[3];else if(d==='kind')o[k]=KINDS[0]}l.push(o)}
    else{const i=l.findIndex(e=>e.type===type);if(i>=0)l.splice(i,1)}touch();panel()}));
   if(have){const sub=E('div',{class:'sub'});
-   for(const[k,d]of Object.entries(params))sub.append(Array.isArray(d)?slider(k,d,have[k]??d[3],v=>{have[k]=v;touch()}):
+   for(const[k,d]of Object.entries(params))sub.append(Array.isArray(d)?slider(k,d,have[k]??d[3],v=>{have[k]=v;touch()}):d==='kind'?
+    E('div',{class:'row'},field('scenery',select(KINDS,have.kind,v=>{have.kind=v;touch()}))):
     E('div',{class:'row'},field(k+' (optional)',colorIn(have[k]||'#ffffff',v=>{have[k]=v;touch()}))));
    box.append(sub)}}
  return box}

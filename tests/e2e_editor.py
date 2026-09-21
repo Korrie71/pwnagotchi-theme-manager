@@ -189,6 +189,14 @@ with sync_playwright() as p:
     page.click("#del")
     page.wait_for_function("!document.querySelector(\".card[data-name='zz-e2e-flow']\")", timeout=8000)
     check("delete works", True)
+    # ---------------------------------------------------------------- scenery in the Effects tab
+    tab("Effects")
+    page.locator("label.ck:has-text('scene') input").first.check()
+    page.wait_for_selector(".fxbox select")
+    page.select_option(".fxbox select >> nth=-1", "volcano")
+    effects = json.loads((tab("JSON"), page.input_value("#json"))[1])["effects"]
+    check("the Effects tab adds a scene and lets you choose its scenery", any(e["type"] == "scene" and e["kind"] == "volcano" for e in effects), effects)
+
     # ---------------------------------------------------------------- layout, awards and settings
     s0 = requests.Session()
     tok0 = re.search(r'name="csrf_token" content="([^"]+)"', s0.get(URL).text).group(1)

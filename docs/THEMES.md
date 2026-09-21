@@ -90,6 +90,38 @@ Effects are applied in a fixed order, no matter how you list them. Numbers outsi
 | `glitch` | yes | `interval` 0.5-60 seconds (4) | short bursts of shifted rows and color split |
 | `rain` | yes | `density` 0.01-1 (0.5), `speed` 0-30 (8), `color` | falling characters behind the UI |
 | `stars` | yes | `density` 0.01-1 (0.5), `speed` 0-30 (3), `color` | twinkling stars behind the UI |
+| `scene` | some | `kind` (required), `strength` 0-1 (1), `speed` 0-30 (3) | scenery painted behind everything, see below |
+
+### Scenery
+
+`{"type": "scene", "kind": "mountains"}` paints a landscape on the background, on top of the gradient and behind the
+ink, so text and the face stay readable. The still picture is drawn once and cached; a few scenes also have a light
+moving layer. `strength` fades the scenery toward the plain background, `speed` scales the movement.
+
+| kind | what it shows | moves |
+|---|---|---|
+| `mountains` | sun over three ridges with snow caps and pines | light snow |
+| `glacier` | icy peaks | snow |
+| `ocean` | a low sun over the sea | waves |
+| `forest` | moon over layers of pines | fireflies |
+| `desert` | big sun, dunes and cacti | |
+| `aurora` | dark peaks under northern lights | swaying curtains |
+| `volcano` | a cone with lava rivers | embers, glowing crater |
+| `winter` | moon, snowy hills and pines | snowfall |
+| `spring` | sun, clouds, meadow with flowers | |
+| `summer` | sun over the sea, beach and palms | waves |
+| `autumn` | hills with bare trees and orange leaves | falling leaves |
+| `halloween` | big moon, a dead tree, gravestones | bats |
+| `christmas` | pines with stars and snow | blinking lights, snow |
+| `space` | nebulae and a ringed planet | |
+| `startrek` | console bars along the edges and a planet | warp streaks |
+| `city` | a neon skyline | |
+| `vaporwave` | striped sun over a grid | the grid glides |
+| `bloodmoon` | a red moon and a dead tree | |
+| `pixel` | blocky hills and clouds in handheld greens | |
+
+Combine it with the other effects: stars over a night scene, `vignette` to darken the edges. The web editor has a
+"scene" checkbox with a kind dropdown under Effects.
 
 Animated effects redraw the screen `fps` times per second. Themes without them only redraw when pwnagotchi does.
 

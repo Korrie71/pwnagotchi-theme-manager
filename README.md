@@ -26,7 +26,7 @@ with pwnagotchi's mood. Themes are small JSON files you can edit in a web editor
 
 ## Features
 
-- **27 built-in themes**, from a Star Trek console to the four seasons, mountains, ocean, desert, aurora and more
+- **27 built-in themes, 19 with scenery** painted behind the text (the `scene` effect): mountains, ocean, forest, desert, volcano, aurora, the four seasons, a Star Trek console, a neon city and more
 - **Colors and gradients** for ink, background and the top/bottom bars
 - **Effects:** glow, scanlines, vignette, film grain, pulse, rainbow, glitch, matrix rain, twinkling stars, border
 - **Per-element colors:** face, name, status, stats and any plugin's on-screen items each get their own color
@@ -50,7 +50,7 @@ regenerate the images with `python tools/make_screenshots.py`.
 
 ![Some of the built-in themes](docs/images/themes.png)
 
-And more: a Star Trek console, the seasons, landscapes and holidays.
+And more, each with its own scenery: a Star Trek console, the seasons, landscapes and holidays.
 
 ![More built-in themes](docs/images/themes-more.png)
 
@@ -87,6 +87,8 @@ And more: a Star Trek console, the seasons, landscapes and holidays.
 Requirements: pwnagotchi 2.9.x (the jayofelony fork) with a `waveshare35lcd` display. Pillow, numpy and Flask are already
 part of pwnagotchi. The touch menu additionally needs a touchscreen that shows up under `/dev/input`
 (for example an ADS7846/XPT2046 controller).
+
+Screen not working yet (white screen, no `/dev/fb*`)? Start with the [display setup guide](docs/DISPLAY-SETUP.md).
 
 ```bash
 git clone https://github.com/Korrie71/pwnagotchi-theme-manager.git
