@@ -232,7 +232,7 @@ with sync_playwright() as p:
 
     tab("Awards")
     page.wait_for_selector(".award")
-    check("the Awards tab lists every achievement with its progress", page.locator(".award").count() >= 20 and page.locator(".award.done").count() >= 1)
+    check("the Awards tab lists every achievement with its progress", page.locator(".award").count() >= 15 and page.locator(".award.done").count() >= 1)
 
     settings0 = requests.get(URL + "api/settings").json()
     tab("Settings")

@@ -1,5 +1,10 @@
 # Changelog
 
+## 2.4.1
+
+- Removed the two "passwords cracked" achievements (Safe Cracker, Locksmith), so there are 19. Saved progress that still
+  mentions them is cleaned up on load. The `{cracked}` text placeholder is unchanged.
+
 ## 2.4.0
 
 **Themes with scenery.** A new `scene` effect paints a landscape behind the text: mountains with snow caps, a sunset
@@ -19,7 +24,7 @@ streaks move; a frame costs 3-6 ms (aurora 15 ms). Available in the web editor (
 `autumn`, `winter`, the landscapes `mountain`, `ocean`, `forest`, `desert`, `aurora`, `volcano`, and `halloween`,
 `christmas` and `space`. `blood` got a brighter accent so its bars are readable.
 
-**Achievements.** 21 of them (handshakes, cracked passwords, running time, days used, themes tried, night owl, swiping,
+**Achievements.** 19 of them (handshakes, running time, days used, themes tried, night owl, swiping,
 moving things, the heat guard, face uploads, backups), a message when one unlocks, an **Awards** tab in the touch menu and
 in the editor. A first run starts from what is already on the device. Off switch in Settings or `achievements off`.
 

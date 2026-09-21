@@ -23,15 +23,15 @@ def unlocked(tm):
 
 # ---------------------------------------------------------------- the table and the file format
 ids = [a[0] for a in T.ACHIEVEMENTS]
-ok("there are 20+ achievements with unique ids", len(ids) >= 20 and len(set(ids)) == len(ids), len(ids))
+ok("there are 19 achievements with unique ids", len(ids) == 19 and len(set(ids)) == len(ids), len(ids))
 ok("names fit a row on the screen", all(len(a[1]) <= 22 for a in T.ACHIEVEMENTS), [a[1] for a in T.ACHIEVEMENTS if len(a[1]) > 22])
 ok("every one has a description and a positive goal", all(a[2] and a[4] > 0 for a in T.ACHIEVEMENTS))
 ok("every statistic they use exists", all(a[3] in T.default_stats() or a[3] in ("hours",) for a in T.ACHIEVEMENTS), sorted({a[3] for a in T.ACHIEVEMENTS}))
 ok("no data: clean defaults", T.clean_achievements(None) == {"unlocked": {}, "stats": T.default_stats()})
 junk = T.clean_achievements({"unlocked": {"first_shake": 5, "bogus": 1, "shakes_10": "yesterday", "swiper": True},
-                             "stats": {"handshakes": -4, "cracked": "many", "days": "monday", "themes": [1, "a"], "swipes": 3, "extra": 1}})
+                             "stats": {"handshakes": -4, "days": "monday", "themes": [1, "a"], "swipes": 3, "extra": 1}})
 ok("junk is replaced by defaults, unknown keys dropped", junk["unlocked"] == {"first_shake": 5.0} and junk["stats"]["handshakes"] == 0
-   and junk["stats"]["cracked"] == 0 and junk["stats"]["days"] == [] and junk["stats"]["themes"] == ["1", "a"] and junk["stats"]["swipes"] == 3
+   and junk["stats"]["days"] == [] and junk["stats"]["themes"] == ["1", "a"] and junk["stats"]["swipes"] == 3
    and "extra" not in junk["stats"], junk)
 ok("long lists are capped", len(T.clean_achievements({"stats": {"days": [str(i) for i in range(1000)]}})["stats"]["days"]) == T.LIST_KEPT)
 ok("progress: hours come from uptime, lists count their entries",
@@ -77,8 +77,8 @@ T._slow.clear()
 tm = mk()
 tm._toast = None
 tm._load_achievements()
-ok("first run: the existing handshakes and cracked passwords count", tm._ach["stats"]["handshakes"] == 120 and tm._ach["stats"]["cracked"] == 12)
-ok("...so the matching achievements are already unlocked", {"first_shake", "shakes_100", "cracked_10"} <= set(unlocked(tm)) and "shakes_500" not in unlocked(tm))
+ok("first run: the existing handshakes count", tm._ach["stats"]["handshakes"] == 120)
+ok("...so the matching achievements are already unlocked", {"first_shake", "shakes_100"} <= set(unlocked(tm)) and "shakes_500" not in unlocked(tm))
 ok("...without a burst of messages", tm._toast is None)
 
 # ---------------------------------------------------------------- switching it off
@@ -117,12 +117,9 @@ ok("running at 3 in the morning unlocks Night Owl", "night_owl" in unlocked(tm))
 tm4 = mk()
 tm4._tick_achievements(time.mktime((2026, 9, 23, 14, 0, 0, 0, 0, -1)))
 ok("...and only then", "night_owl" not in unlocked(tm4))
-tm5 = mk()
-open(os.path.join(hs, "wpa-sec.cracked.potfile"), "w").write("a:b:c:d\n")
-T._slow.clear()
-tm5._ach_next_slow = 0
-tm5._tick_achievements(time.time())
-ok("cracked passwords are picked up from the potfiles", tm5._ach["stats"]["cracked"] >= 1 and "cracked_1" in unlocked(tm5))
+ok("nothing about cracked passwords is left in the list", not any("crack" in i or "crack" in a[3] for i, a in ((x[0], x) for x in T.ACHIEVEMENTS)))
+old = T.clean_achievements({"unlocked": {"cracked_1": 5, "first_shake": 6}, "stats": {"cracked": 9}})
+ok("an old file that still has them loads without them", old["unlocked"] == {"first_shake": 6.0} and "cracked" not in old["stats"])
 
 # ---------------------------------------------------------------- what the features report
 tm = mk()

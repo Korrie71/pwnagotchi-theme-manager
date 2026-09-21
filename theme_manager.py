@@ -1995,8 +1995,6 @@ ACHIEVEMENTS = (
     ("shakes_50", "Collector", "Capture 50 handshakes", "handshakes", 50),
     ("shakes_100", "Centurion", "Capture 100 handshakes", "handshakes", 100),
     ("shakes_500", "Legend", "Capture 500 handshakes", "handshakes", 500),
-    ("cracked_1", "Safe Cracker", "Get a password cracked", "cracked", 1),
-    ("cracked_10", "Locksmith", "Get 10 passwords cracked", "cracked", 10),
     ("uptime_1", "Warming Up", "Run for 1 hour in total", "hours", 1),
     ("uptime_24", "Around the Clock", "Run for 24 hours in total", "hours", 24),
     ("uptime_100", "Marathon", "Run for 100 hours in total", "hours", 100),
@@ -2018,7 +2016,7 @@ LIST_KEPT = 400
 
 
 def default_stats():
-    return {"handshakes": 0, "cracked": 0, "uptime_seconds": 0.0, "days": [], "themes": [], "night_owl": 0,
+    return {"handshakes": 0, "uptime_seconds": 0.0, "days": [], "themes": [], "night_owl": 0,
             "swipes": 0, "layout_moves": 0, "hot_events": 0, "face_uploads": 0, "backups": 0}
 
 
@@ -2174,7 +2172,7 @@ def draw_toast(img, text, theme):
 
 class ThemeManager(plugins.Plugin):
     __author__ = "theme_manager contributors"
-    __version__ = "2.4.0"
+    __version__ = "2.4.1"
     __license__ = "GPL3"
     __description__ = "Theme engine for the 3.5 inch display: colors, effects, animations, custom text, web GUI."
 
@@ -2200,7 +2198,6 @@ class ThemeManager(plugins.Plugin):
         self._ach_loaded = False
         self._ach_saved = 0
         self._ach_last = 0
-        self._ach_next_slow = 0
         self._settings = clean_settings({})
         self._settings_mtime = 0
         self._layout = {}
@@ -2628,7 +2625,7 @@ class ThemeManager(plugins.Plugin):
         self._ach = clean_achievements(data)
         self._ach_loaded = True
         if data is None:      # first run: start from what is already on disk, and unlock those without fanfare
-            for stat, count in (("handshakes", _count_handshakes), ("cracked", _count_cracked)):
+            for stat, count in (("handshakes", _count_handshakes),):
                 try:
                     self._ach["stats"][stat] = int(count())
                 except (ValueError, OSError):
@@ -2701,12 +2698,6 @@ class ThemeManager(plugins.Plugin):
         self._stat("days", mark=time.strftime("%Y-%m-%d", time.localtime(now)))
         if time.localtime(now).tm_hour == 3:
             self._stat("night_owl", at_least=1)
-        if now >= self._ach_next_slow:                 # counting the cracked passwords reads files: once a minute
-            self._ach_next_slow = now + 60
-            try:
-                self._stat("cracked", at_least=int(_count_cracked()))
-            except (ValueError, OSError):
-                pass
         self._check_achievements()
         if self._ach_dirty and now - self._ach_saved > 300:
             self._save_achievements()

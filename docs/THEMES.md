@@ -335,13 +335,12 @@ element is drawn at the new spot, so its colors, glow and effects go with it. Pw
 
 ## Achievements
 
-A small set of achievements to unlock: handshakes captured (1, 10, 50, 100, 500), passwords cracked, hours of running
+A small set of achievements to unlock: handshakes captured (1, 10, 50, 100, 500), hours of running
 time, different days used, themes tried, running at 3 in the morning, swiping to change theme, moving something on the
 screen, the heat guard stepping in, uploading a face, and downloading a backup. A message shows on the screen when
 one unlocks. The **Awards** tab of the touch menu and of the web editor show them all with their progress.
 
-Progress is kept in `/etc/pwnagotchi/themes/achievements.json`. The first time, it starts from the handshakes and
-cracked passwords already on the device (those unlock without a message). Switch it all off in the web editor
+Progress is kept in `/etc/pwnagotchi/themes/achievements.json`. The first time, it starts from the handshakes already on the device (those unlock without a message). Switch it all off in the web editor
 (Settings tab) or with `theme_manager.py achievements off`: nothing is counted or written then.
 
 ## Brightness and night mode
