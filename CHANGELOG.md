@@ -1,5 +1,13 @@
 # Changelog
 
+## 2.5.0
+
+**Cracking dashboard.** A new **Crack** tab in the touch menu and the web editor lists every captured handshake,
+newest first, with a status pill: cracked (tap it for the password), uploaded, queued or rejected, read from the
+`wpa-sec` plugin's own database and potfile. A summary line up top shows the totals. New placeholders `{queued}`,
+`{uploaded}` and `{invalid}`. It only reads that data; nothing here changes what gets attacked or uploaded.
+CLI: `cracking` (JSON summary) and `cracking list`.
+
 ## 2.4.1
 
 - Removed the two "passwords cracked" achievements (Safe Cracker, Locksmith), so there are 19. Saved progress that still

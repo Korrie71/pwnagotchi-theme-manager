@@ -64,7 +64,7 @@ menu = {"mode": "list", "tab": "themes", "page": 0, "pages": {}, "names": list(t
                   "Up 03:12:45  Power OK  Bat n/a", "Pwned 27  Cracked 3  Session 4"], "mode_now": "AUTO"}
 # achievements with made-up progress, and the elements a layout list would show
 fake = {"handshakes": 27, "cracked": 3, "hours": 12.5, "days": 4, "themes": 6}
-done = {"first_shake", "shakes_10", "cracked_1", "uptime_1", "days_3", "swiper"}
+done = {"first_shake", "shakes_10", "uptime_1", "days_3", "swiper"}
 award_info = {}
 for aid, aname, desc, stat, goal in T.ACHIEVEMENTS:
     award_info[aid] = {"id": aid, "name": aname, "desc": desc, "goal": goal, "unlocked": 1.0 if aid in done else None,
@@ -72,9 +72,19 @@ for aid, aname, desc, stat, goal in T.ACHIEVEMENTS:
 elements = ["aps", "channel", "face", "line1", "line2", "mode", "name", "shakes", "status", "uptime"]
 menu.update(awards=[a[0] for a in T.ACHIEVEMENTS], award_info=award_info, awards_on=True, layout=elements,
             layout_info={"face": (12, 6), "name": (0, -4)}, overheat=False)
+# a cracking dashboard with made-up handshakes (never the real ones)
+crack_rows = [
+    {"file": "CoffeeShop_aabbccdd0001.pcapng", "name": "CoffeeShop", "bssid": "aabbccdd0001", "status": "cracked", "password": "letmein123"},
+    {"file": "GuestWifi_aabbccdd0002.pcapng", "name": "GuestWifi", "bssid": "aabbccdd0002", "status": "uploaded", "password": None},
+    {"file": "Office5G_aabbccdd0003.pcapng", "name": "Office5G", "bssid": "aabbccdd0003", "status": "queued", "password": None},
+    {"file": "OldRouter_aabbccdd0004.pcapng", "name": "OldRouter", "bssid": "aabbccdd0004", "status": "invalid", "password": None},
+]
+crack_info = {"__summary__": {"kind": "summary", "text": T._crack_summary_text(T.crack_summary(crack_rows))}}
+crack_info.update({r["file"]: dict(r, kind="row") for r in crack_rows})
+menu.update(crack=["__summary__"] + [r["file"] for r in crack_rows], crack_info=crack_info)
 for name, extra in (("menu-themes.png", {"tab": "themes", "page": 1}), ("menu-plugins.png", {"tab": "plugins", "busy": {"bt-tether"}}),
                     ("menu-system.png", {"tab": "system", "overheat": True}), ("menu-awards.png", {"tab": "awards"}),
-                    ("menu-layout.png", {"tab": "layout", "page": 1}),
+                    ("menu-layout.png", {"tab": "layout", "page": 1}), ("menu-crack.png", {"tab": "crack"}),
                     ("menu-adjust.png", {"mode": "adjust", "adjust": "face", "offset": (12, 6), "box": (25, 52, 252, 122), "step_px": 5})):
     render("cyberpunk", menu=dict(menu, **extra)).save(os.path.join(OUT, name), optimize=True)
 

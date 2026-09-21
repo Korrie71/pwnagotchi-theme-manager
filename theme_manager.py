@@ -13,6 +13,7 @@ CLI (run with /opt/.pwn/bin/python3):
   theme_manager.py overheat on 85 60      turn the Pi off after 60 s at 85 C (or: overheat off)
   theme_manager.py achievements on|off    keep track of achievements or not
   theme_manager.py layout show|reset      what was moved on the screen, or put everything back
+  theme_manager.py cracking [list]        handshake upload/crack counts, or the full list
   theme_manager.py validate FILE.json
   theme_manager.py preview NAME OUT.png [seconds]
 """
@@ -29,6 +30,7 @@ import re
 import select
 import shutil
 import socket
+import sqlite3
 import struct
 import threading
 import time
@@ -80,7 +82,7 @@ SCENE_KINDS = ("mountains", "glacier", "ocean", "forest", "desert", "aurora", "v
                "halloween", "christmas", "space", "startrek", "city", "vaporwave", "bloodmoon", "pixel")
 ANIMATED = {"pulse", "rainbow", "glitch", "rain", "stars", "noise"}
 LIVE_TOKENS = ("{time}", "{cpu}", "{temp}", "{mem}", "{uptime}", "{ip}", "{gps}", "{lat}", "{lon}", "{sats}",
-               "{handshakes}", "{cracked}", "{session}", "{battery}", "{power}", "{mode}")
+               "{handshakes}", "{cracked}", "{session}", "{battery}", "{power}", "{mode}", "{queued}", "{uploaded}", "{invalid}")
 NUM_LIMITS = {"strength": (0, 1), "speed": (0, 30), "size": (1, 64), "density": (0.01, 1),
               "radius": (0, 12), "interval": (0.5, 60)}
 TEXT_MAX = 20
@@ -563,6 +565,9 @@ def _local_ip():
 
 
 def _handshake_dir():
+    override = os.environ.get("THEME_MANAGER_HANDSHAKES")     # for testing: a real pwnagotchi never sets this
+    if override:
+        return override
     try:
         import pwnagotchi
         return pwnagotchi.config["bettercap"]["handshakes"]
@@ -582,6 +587,107 @@ def _count_cracked():
             with open(os.path.join(d, f), errors="ignore") as fp:
                 n += sum(1 for line in fp if line.strip())
     return str(n)
+
+
+# ---------------------------------------------------------------- cracking dashboard
+# Read-only: the wpa-sec plugin (if installed and enabled) tracks each handshake's upload in a small sqlite database
+# and writes cracked results to a potfile; this only ever reads those, never writes them or changes what gets attacked.
+WPA_SEC_DB = os.environ.get("THEME_MANAGER_WPA_DB", "/etc/pwnagotchi/.wpa_sec_db")   # env var is for testing
+CRACK_STATUS = {0: "queued", 1: "invalid", 2: "uploaded"}    # the wpa-sec plugin's own status codes
+BSSID_HEX = re.compile(r"[0-9a-fA-F]{12}")
+HANDSHAKE_RE = re.compile(r"^(.*)_([0-9a-fA-F]{12})\.(?:pcap|pcapng)$")
+CRACK_PILL = {"cracked": ("PWND", True), "uploaded": ("WAIT", False), "queued": ("NEW", False),
+              "invalid": ("BAD", False), "unknown": ("?", False)}
+
+
+def _wpa_db_status():
+    """{path: status} from the wpa-sec plugin's database, or None if it isn't there or can't be read."""
+    try:
+        con = sqlite3.connect("file:%s?mode=ro" % WPA_SEC_DB, uri=True, timeout=2)
+        try:
+            return dict(con.execute("SELECT path, status FROM handshakes").fetchall())
+        finally:
+            con.close()
+    except sqlite3.Error:
+        return None
+
+
+def _wpa_db_counts():
+    """{"queued", "uploaded", "invalid"}: how many handshakes are in each state, or "n/a" if wpa-sec isn't set up."""
+    status = _wpa_db_status()
+    if status is None:
+        return {"queued": "n/a", "uploaded": "n/a", "invalid": "n/a"}
+    out = {"queued": 0, "uploaded": 0, "invalid": 0}
+    for s in status.values():
+        name = CRACK_STATUS.get(s, "queued")
+        out[name] = out.get(name, 0) + 1
+    return {k: str(v) for k, v in out.items()}
+
+
+def _wpa_potfile():
+    """{bssid: (essid, password)} parsed from wpa-sec.cracked.potfile (bssid:station_mac:essid:password lines)."""
+    out = {}
+    try:
+        with open(os.path.join(_handshake_dir(), "wpa-sec.cracked.potfile"), errors="ignore") as fp:
+            for line in fp:
+                parts = line.rstrip("\n").split(":")
+                if len(parts) >= 4 and BSSID_HEX.fullmatch(parts[0]):
+                    out[parts[0].lower()] = (parts[2], parts[3])
+    except OSError:
+        pass
+    return out
+
+
+def _crack_rows_impl(limit):
+    d = _handshake_dir()
+    try:
+        entries = [(e.name, e.stat().st_mtime) for e in os.scandir(d)
+                   if e.is_file() and e.name.endswith((".pcap", ".pcapng"))]
+    except OSError:
+        return []
+    entries.sort(key=lambda e: -e[1])
+    pot = _wpa_potfile()
+    db_status = _wpa_db_status()
+    have_db = db_status is not None
+    db_base = {os.path.basename(k): v for k, v in db_status.items()} if have_db else {}
+    rows = []
+    for name, mtime in entries[:limit]:
+        m = HANDSHAKE_RE.match(name)
+        essid, bssid = (m.group(1), m.group(2).lower()) if m else (os.path.splitext(name)[0], None)
+        if bssid and bssid in pot:
+            pot_essid, password = pot[bssid]
+            rows.append({"file": name, "name": pot_essid or essid or "(hidden)", "bssid": bssid,
+                         "status": "cracked", "password": password, "time": mtime})
+            continue
+        code = db_base.get(name)
+        status = CRACK_STATUS.get(code, "queued") if code is not None else ("queued" if have_db else "unknown")
+        rows.append({"file": name, "name": essid or "(hidden)", "bssid": bssid, "status": status,
+                     "password": None, "time": mtime})
+    return rows
+
+
+def crack_rows(limit=300):
+    """One row per captured handshake (newest first): file, name, bssid, status, password (if cracked)."""
+    return _cached(("crack-rows", limit), 5, lambda: _crack_rows_impl(limit))
+
+
+def crack_summary(rows=None):
+    """{"total", "cracked", "uploaded", "queued", "invalid", "unknown"} counted from crack_rows()."""
+    rows = crack_rows() if rows is None else rows
+    out = {"total": len(rows), "cracked": 0, "uploaded": 0, "queued": 0, "invalid": 0, "unknown": 0}
+    for r in rows:
+        out[r["status"]] = out.get(r["status"], 0) + 1
+    return out
+
+
+def _crack_summary_text(summary):
+    if summary["total"] == 0:
+        return "no handshakes yet"
+    if summary["unknown"]:
+        return "%d cracked of %d  \u00b7  wpa-sec plugin not active" % (summary["cracked"], summary["total"])
+    if summary["queued"] or summary["uploaded"] or summary["invalid"]:
+        return "%d cracked of %d  \u00b7  %d queued  %d invalid" % (summary["cracked"], summary["total"], summary["queued"], summary["invalid"])
+    return "%d cracked of %d handshakes" % (summary["cracked"], summary["total"])
 
 
 def _power_state():
@@ -628,6 +734,8 @@ class _Lazy(dict):
             return time.strftime("%Y-%m-%d")
         if key == "stardate":
             return _stardate()
+        if key in ("queued", "uploaded", "invalid"):
+            return _cached("wpa-counts", 20, _wpa_db_counts).get(key, "n/a")
         if key in PROVIDERS:
             ttl, fn = PROVIDERS[key]
             return _cached(key, ttl, fn)
@@ -1761,7 +1869,7 @@ CONFIRM_S = 4.0          # a power button must be tapped twice within this time
 GPS_TOKENS = ("gps", "lat", "lon", "sats")
 STATUS_LINES = ("CPU {temp}  load {cpu}  RAM {mem}", "IP {ip}", "GPS {gps}  {lat} {lon}",
                 "Up {uptime}  Power {power}  Bat {battery}", "Pwned {handshakes}  Cracked {cracked}  Session {session}")
-TAB_NAMES = ("themes", "plugins", "system", "awards", "layout")
+TAB_NAMES = ("themes", "plugins", "system", "awards", "layout", "crack")
 TABS = tuple((name, (28 + i * (424 // len(TAB_NAMES)), 10, 28 + i * (424 // len(TAB_NAMES)) + 424 // len(TAB_NAMES) - 4, 38))
              for i, name in enumerate(TAB_NAMES))
 PROTECTED_PLUGINS = ('theme_manager',)   # never listed: switching it off would remove the menu itself
@@ -1826,7 +1934,7 @@ def to_screen(m, x, y):
 
 def menu_items(menu):
     tab = menu.get("tab", "themes")
-    return {"themes": menu["names"], "awards": menu["awards"], "layout": menu["layout"]}.get(tab, menu["plugins"])
+    return {"themes": menu["names"], "awards": menu["awards"], "layout": menu["layout"], "crack": menu["crack"]}.get(tab, menu["plugins"])
 
 
 def adjust_popup(menu):
@@ -1856,7 +1964,7 @@ def menu_hits(menu):
         return [((28, 268, 118, 308), ("refresh", None)), ((124, 268, 214, 308), ("dim", None)),
                 ((28, 166, 236, 200), ("mode", None)), ((242, 166, 452, 200), ("overheat", None)), ((28, 208, 152, 248), ("power", "restart")),
                 ((158, 208, 282, 248), ("power", "reboot")), ((288, 208, 412, 248), ("power", "shutdown"))] + common
-    act = {"themes": "pick", "awards": "award", "layout": "adjust"}.get(tab, "toggle")
+    act = {"themes": "pick", "awards": "award", "layout": "adjust", "crack": "crackrow"}.get(tab, "toggle")
     hits = [((28, 44 + i * 44, 452, 44 + i * 44 + 40), (act, n))
             for i, n in enumerate(menu_items(menu)[page * MENU_ROWS:(page + 1) * MENU_ROWS])]
     if tab == "layout":
@@ -1968,6 +2076,18 @@ def draw_menu(img, menu, theme):
             d.rounded_rectangle((px0, y0 + 7, px1, y1 - 7), 10, fill=acc if moved else panel, outline=acc, width=2)
             d.text(((px0 + px1) // 2, (y0 + y1) // 2), "%+d,%+d" % (dx, dy) if moved else "move", font=_font(15, True),
                    fill=bg if moved else fg, anchor="mm")
+        elif act == "crackrow":
+            info = menu["crack_info"][arg]
+            if info["kind"] == "summary":
+                d.text((x0 + 6, (y0 + y1) // 2), info["text"], font=_font(14, True), fill=fg, anchor="lm")
+            else:
+                label, done = CRACK_PILL.get(info["status"], ("?", False))
+                name = info["name"] if len(info["name"]) <= 21 else info["name"][:20] + "…"
+                d.rectangle(rect, fill=line, outline=acc if done else line, width=2)
+                d.text((x0 + 12, (y0 + y1) // 2), name, font=_font(18, done), fill=fg if done else _mixc(fg, bg, 0.45), anchor="lm")
+                px0, px1 = x1 - 78, x1 - 10
+                d.rounded_rectangle((px0, y0 + 7, px1, y1 - 7), 10, fill=acc if done else panel, outline=acc, width=2)
+                d.text(((px0 + px1) // 2, (y0 + y1) // 2), label, font=_font(14, True), fill=bg if done else fg, anchor="mm")
         elif act == "resetall":
             ask = bool(menu.get("confirm")) and menu["confirm"][0] == "resetall"
             d.rectangle(rect, fill=acc if ask else line, outline=acc, width=1)
@@ -2172,7 +2292,7 @@ def draw_toast(img, text, theme):
 
 class ThemeManager(plugins.Plugin):
     __author__ = "theme_manager contributors"
-    __version__ = "2.4.1"
+    __version__ = "2.5.0"
     __license__ = "GPL3"
     __description__ = "Theme engine for the 3.5 inch display: colors, effects, animations, custom text, web GUI."
 
@@ -2528,6 +2648,8 @@ class ThemeManager(plugins.Plugin):
                 menu["box"] = region[1] if region else None
             if menu.get("tab") == "system" and menu["mode"] == "list":
                 self._fill_status(menu)
+            elif menu.get("tab") == "crack" and menu["mode"] == "list":
+                self._sync_crack_menu(menu)
             draw_menu(img, menu, self._theme)
         toast = self._toast
         if toast is not None:
@@ -2595,13 +2717,26 @@ class ThemeManager(plugins.Plugin):
             self._menu = {"mode": mode, "tab": tab if tab in TAB_NAMES else "themes", "page": 0,
                           "pages": {t: 0 for t in TAB_NAMES}, "confirm": None, "awards_on": self._settings["achievements"],
                           "awards": [a[0] for a in ACHIEVEMENTS] if self._settings["achievements"] else [], "layout": [], "layout_info": {},
+                          "crack": [], "crack_info": {},
                           "award_info": {r["id"]: r for r in self.award_rows()}, "plugins": self._plugin_names(),
                           "on": set(plugins.loaded), "busy": set(), "failed": set(), "step": 0, "raw": [], "names": list(themes),
                           "colors": {n: t for n, t in themes.items()}, "active": self._active,
                           "until": now + (CALIB_TIMEOUT if mode == "calib" else MENU_TIMEOUT)}
         self._sync_layout_menu(self._menu)
+        self._sync_crack_menu(self._menu)
         self._wake.set()
         self._refresh_now()
+
+    def _sync_crack_menu(self, menu):
+        rows = crack_rows()
+        summary = crack_summary(rows)
+        info = {"__summary__": {"kind": "summary", "text": _crack_summary_text(summary)}}
+        order = ["__summary__"]
+        for r in rows:
+            info[r["file"]] = dict(r, kind="row")
+            order.append(r["file"])
+        menu["crack"] = order
+        menu["crack_info"] = info
 
     def _sync_layout_menu(self, menu):
         rows = self.layout_rows()
@@ -2996,6 +3131,15 @@ class ThemeManager(plugins.Plugin):
                     info = menu["award_info"].get(arg)
                     if info:
                         self.toast(info["desc"], seconds=3, now=now)
+                        self._refresh_now()
+                    return
+                elif act == "crackrow":
+                    info = menu["crack_info"].get(arg)
+                    if info and info["kind"] == "row":
+                        msgs = {"cracked": "%s: %s" % (info["name"], info["password"]), "invalid": "invalid capture",
+                                "uploaded": "uploaded, not cracked yet", "queued": "waiting to upload",
+                                "unknown": "status unknown (wpa-sec plugin not active)"}
+                        self.toast(msgs.get(info["status"], "?"), seconds=4, now=now)
                         self._refresh_now()
                     return
                 elif act == "cal":
@@ -3518,6 +3662,10 @@ class ThemeManager(plugins.Plugin):
         if path == "api/layout" and request.method != "POST":
             return jsonify({"rows": self.layout_rows(), "max": LAYOUT_MAX})
 
+        if path == "api/cracking":
+            rows = crack_rows()
+            return jsonify({"summary": crack_summary(rows), "rows": rows[:200], "wpa_sec": _wpa_db_status() is not None})
+
         if path == "api/backup":
             self._stat("backups", add=1)
             return Response(make_backup(), mimetype="application/zip",
@@ -3752,7 +3900,7 @@ const KINDS=SCENE_KINDS_JS;
 const ANIM=['pulse','rainbow','glitch','rain','stars','noise'];
 const MOODS=['look_r','sleep','awake','bored','intense','cool','happy','grateful','excited','motivated','demotivated','smart','lonely','sad','angry','friend','broken','debug','upload','handshake'];
 const HOLDERS=['{name}','{time}','{date}','{cpu}','{temp}','{mem}','{uptime}','{ip}','{mode}','{gps}','{lat}','{lon}','{sats}','{handshakes}','{cracked}','{session}','{power}','{battery}'];
-const TABS=['Colors','Effects','Text','Elements','Moods','Faces','JSON','Layout','Awards','Settings'];
+const TABS=['Colors','Effects','Text','Elements','Moods','Faces','JSON','Layout','Awards','Cracking','Settings'];
 let S={active:'',themes:{}},sel='',cur={},info={elements:[],entities:[],packs:{}},tab='Colors',mood='sad',pvMood=null,busy=false,dirty=false,pvErr=false,timer=null;
 const say=t=>$('msg').textContent=t||'';
 /* After the plugin restarts (or the browser loses its session) the page's token is stale: fetch a fresh one and retry once. */
@@ -3950,6 +4098,22 @@ function panelAwards(){const p=E('div');
    E('div',{class:'gbar',style:'background:linear-gradient(90deg,var(--acc) '+pct+'%,var(--bg) '+pct+'%);height:8px;margin:6px 0 0'}),
    E('small',{style:'color:var(--dim)'},d?'unlocked '+new Date(a.unlocked*1000).toLocaleDateString():Math.floor(Math.min(a.progress,a.goal))+' / '+a.goal)))}
  return p}
+let crack={summary:{total:0,cracked:0,queued:0,uploaded:0,invalid:0,unknown:0},rows:[],wpa_sec:false};
+async function loadCracking(){try{crack=await(await fetch(base+'/api/cracking')).json()}catch(e){}}
+function panelCracking(){const p=E('div'),s=crack.summary;
+ p.append(E('p',{style:'color:var(--dim);margin:0 0 10px'},crack.wpa_sec?'From the wpa-sec plugin\\'s own upload/crack tracking. Read-only: nothing here changes what gets attacked.':
+  'The wpa-sec plugin is not tracking uploads, so only what has actually been cracked is known. Handshakes otherwise show as \\'unknown\\'.'));
+ p.append(E('div',{class:'wpa-stats',style:'display:grid;grid-template-columns:repeat(auto-fit,minmax(90px,1fr));gap:8px;margin-bottom:12px'},
+  [['cracked','Cracked'],['queued','Queued'],['uploaded','Uploaded'],['invalid','Invalid'],['total','Total']].map(([k,l])=>
+   E('div',{class:'card',style:'text-align:center;cursor:default'},E('div',{style:'font-size:22px'},String(s[k])),E('small',{style:'color:var(--dim)'},l)))));
+ if(!crack.rows.length){p.append(E('p',{style:'color:var(--dim)'},'No handshakes yet.'));return p}
+ const PILL={cracked:['PWND',1],uploaded:['WAIT',0],queued:['NEW',0],invalid:['BAD',0],unknown:['?',0]};
+ for(const r of crack.rows){const[label,done]=PILL[r.status]||['?',0];
+  p.append(E('div',{class:'erow set',style:done?'border-color:var(--acc)':''},
+   E('span',{class:'ename',style:'width:170px'},r.name||'(hidden)'),
+   E('span',{class:'inh',style:'flex:1'},r.status==='cracked'?r.password:(r.bssid||'')),
+   E('span',{style:'padding:2px 10px;border-radius:10px;font-size:11px;background:'+(done?'var(--acc)':'transparent')+';border:1px solid var(--acc);color:'+(done?'var(--bg)':'var(--text)')},label)))}
+ return p}
 let cfg={settings:{},display:{dim:1,night:null,idle:null},limits:{}};
 async function loadSettings(){try{cfg=await(await fetch(base+'/api/settings')).json()}catch(e){}}
 async function saveSettings(){const j=await(await post('settings',{settings:cfg.settings,display:cfg.display})).json();
@@ -3972,9 +4136,9 @@ function panelSettings(){const p=E('div'),s=cfg.settings,d=cfg.display;
   idleOn?[field('after (minutes)',num(d.idle.minutes,v=>d.idle.minutes=v,1,240)),slider('dim to',[5,100,5],Math.round(d.idle.dim*100),v=>{d.idle.dim=v/100})]:null));
  p.append(E('div',{class:'row'},E('button',{id:'setsave',onclick:saveSettings},'Save settings')));
  return p}
-const PANELS={Colors:panelColors,Effects:panelEffects,Text:panelText,Elements:panelElements,Moods:panelMoods,Faces:panelFaces,JSON:panelJson,Layout:panelLayout,Awards:panelAwards,Settings:panelSettings};
+const PANELS={Colors:panelColors,Effects:panelEffects,Text:panelText,Elements:panelElements,Moods:panelMoods,Faces:panelFaces,JSON:panelJson,Layout:panelLayout,Awards:panelAwards,Cracking:panelCracking,Settings:panelSettings};
 function panel(){const p=$('panel');p.innerHTML='';p.append(PANELS[tab]());
- const t=$('tabs');t.innerHTML='';for(const n of TABS)t.append(E('button',{class:n===tab?'on':'',onclick:async()=>{tab=n;pickKey=null;$('pick').innerHTML='';$('pick').className='';pvMood=n==='Moods'?mood:null;if(n==='Elements'||n==='Moods'){try{info.entities=await(await fetch(base+'/api/entities')).json()}catch(e){}}if(n==='Layout')await loadLayout();if(n==='Awards')await loadAwards();if(n==='Settings')await loadSettings();panel();overlay();schedule()}},n))}
+ const t=$('tabs');t.innerHTML='';for(const n of TABS)t.append(E('button',{class:n===tab?'on':'',onclick:async()=>{tab=n;pickKey=null;$('pick').innerHTML='';$('pick').className='';pvMood=n==='Moods'?mood:null;if(n==='Elements'||n==='Moods'){try{info.entities=await(await fetch(base+'/api/entities')).json()}catch(e){}}if(n==='Layout')await loadLayout();if(n==='Awards')await loadAwards();if(n==='Cracking')await loadCracking();if(n==='Settings')await loadSettings();panel();overlay();schedule()}},n))}
 
 /* ---- drag text lines on the preview ---- */
 const est=t=>(t||'').replace(/\{time\}/g,'00:00:00').replace(/\{date\}/g,'0000-00-00').replace(/\{\w+\}/g,'0000').length;
@@ -4123,6 +4287,12 @@ if __name__ == "__main__":
             print(json.dumps(clean_layout(json.load(open(LAYOUT_FILE)))))
         except (OSError, ValueError):
             print("{}")
+    elif cmd == "cracking" and len(a) == 1:
+        print(json.dumps(crack_summary()))
+    elif cmd == "cracking" and len(a) == 2 and a[1] == "list":
+        for r in crack_rows():
+            extra = ": %s" % r["password"] if r["status"] == "cracked" else ""
+            print("%-8s %-24s %s%s" % (r["status"], r["name"] or "(hidden)", r["bssid"] or "?", extra))
     elif cmd == "validate" and len(a) == 2:
         try:
             t = _clean(json.load(open(a[1])))

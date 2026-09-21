@@ -96,7 +96,7 @@ tm, ui, els = rig()
 finger = Panel(tm)
 finger.calibrate()
 tm.open_menu("list")
-ok("five tabs that fit and do not overlap", len(T.TABS) == 5 and all(T.TABS[i][1][2] < T.TABS[i + 1][1][0] for i in range(4)) and T.TABS[-1][1][2] <= 452)
+ok("the tabs fit and do not overlap", all(T.TABS[i][1][2] < T.TABS[i + 1][1][0] for i in range(len(T.TABS) - 1)) and T.TABS[-1][1][2] <= 452)
 finger.tap_rect(finger.hit("tab", "layout"))
 ok("the Layout tab lists what is on the screen", tm._menu["tab"] == "layout" and {"face", "name", "status"} <= set(tm._menu["layout"]))
 rows = [r for r in T.menu_hits(tm._menu) if r[1][0] == "adjust"]

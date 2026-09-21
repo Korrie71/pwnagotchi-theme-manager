@@ -161,9 +161,12 @@ Placeholders are replaced with live values (unknown ones are printed as they are
 | `{power}` | `OK` or `LOW` (the Pi's undervoltage flag) |
 | `{battery}` | battery percentage if the system reports one, else `n/a` |
 | `{stardate}` | a made-up stardate from the calendar, like `26264.4` |
+| `{queued}` `{uploaded}` `{invalid}` | handshakes waiting to upload, uploaded, or rejected by wpa-sec (`n/a` without the `wpa-sec` plugin) |
 
-`{gps}`, `{lat}`, `{lon}` and `{sats}` need pwnagotchi's `gps` plugin (which turns on bettercap's GPS module).
-Values that are slow to read (`{ip}`, `{handshakes}`, `{cracked}`, `{battery}`) are cached for a few seconds, and a value
+`{gps}`, `{lat}`, `{lon}` and `{sats}` need pwnagotchi's `gps` plugin (which turns on bettercap's GPS module). `{queued}`,
+`{uploaded}` and `{invalid}` need pwnagotchi's own `wpa-sec` plugin, which uploads handshakes and downloads cracked
+passwords; without it they read `n/a` and the Crack tab shows every handshake as "unknown".
+Values that are slow to read (`{ip}`, `{handshakes}`, `{cracked}`, `{battery}`, `{queued}`, `{uploaded}`, `{invalid}`) are cached for a few seconds, and a value
 is only read at all if a text line uses it. Lines with any live placeholder (everything except `{name}` and `{date}`) or
 `scroll` make the theme redraw once a second (or at `fps` for scrolling text).
 Use `{{` and `}}` for literal braces.
@@ -308,6 +311,13 @@ stay until that spot changes). `dim` cycles the brightness 100% / 60% / 30% (see
 Tap a row to see what it asks for.
 
 **Layout** lists everything on the screen so you can move it (see "Moving things on the screen").
+
+**Crack** is a cracking dashboard: a summary line (cracked / queued / invalid, from the `wpa-sec` plugin if it is
+installed and enabled) followed by every captured handshake, newest first, each with a colored status pill: `PWND`
+(cracked, tap it to see the password), `WAIT` (uploaded, not cracked yet), `NEW` (waiting to upload), `BAD` (wpa-sec
+rejected it) or `?` (wpa-sec isn't tracking it). Nothing here changes what gets attacked; it only reads the same
+sqlite database and potfile the `wpa-sec` plugin already keeps. The web editor has the same information in its
+Cracking tab. `theme_manager.py cracking` prints the summary as JSON, `cracking list` prints every row.
 
 **Swipe:** on the bare screen (no menu open), swipe sideways to change theme: left goes to the next theme, right to the
 previous one, and the new theme's name shows for a moment. It needs the calibration, and only clearly sideways swipes
