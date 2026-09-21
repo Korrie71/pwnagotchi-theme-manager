@@ -690,6 +690,33 @@ def _crack_summary_text(summary):
     return "%d cracked of %d handshakes" % (summary["cracked"], summary["total"])
 
 
+# ---------------------------------------------------------------- radar (display-only ranking, never touches attacks)
+RADAR_MAX = 60      # networks kept, best first
+
+
+def _ap_score(ap, captured):
+    """A rough 'worth attacking' score from what pwnagotchi already knows about an access point: a closer signal and
+    more clients mean more chances at a handshake; one already captured, or WPA3-only, counts against it. Display
+    only: nothing here changes what bettercap actually attacks."""
+    rssi = ap.get("rssi")
+    sig = max(0.0, min(1.0, (rssi + 90) / 60.0)) if isinstance(rssi, (int, float)) else 0.3
+    score = sig * 40 + min(len(ap.get("clients") or []), 5) * 12
+    if (ap.get("mac") or "").lower().replace(":", "") in captured:
+        score -= 60
+    if "WPA3" in (ap.get("encryption") or "").upper():
+        score -= 15
+    return round(score, 1)
+
+
+def _radar_summary_text(rows, age):
+    if not rows:
+        return "no networks seen yet"
+    if age is not None and age > 120:
+        return "%d networks (scan is %d minutes old)" % (len(rows), int(age // 60))
+    best = rows[0]
+    return "%d networks  ·  best: %s (%d clients)" % (len(rows), best["name"], best["clients"])
+
+
 def _power_state():
     """OK / LOW from the Pi's undervoltage flag."""
     for h in glob.glob("/sys/class/hwmon/hwmon*"):
@@ -1869,7 +1896,7 @@ CONFIRM_S = 4.0          # a power button must be tapped twice within this time
 GPS_TOKENS = ("gps", "lat", "lon", "sats")
 STATUS_LINES = ("CPU {temp}  load {cpu}  RAM {mem}", "IP {ip}", "GPS {gps}  {lat} {lon}",
                 "Up {uptime}  Power {power}  Bat {battery}", "Pwned {handshakes}  Cracked {cracked}  Session {session}")
-TAB_NAMES = ("themes", "plugins", "system", "awards", "layout", "crack")
+TAB_NAMES = ("themes", "plugins", "system", "awards", "layout", "crack", "radar")
 TABS = tuple((name, (28 + i * (424 // len(TAB_NAMES)), 10, 28 + i * (424 // len(TAB_NAMES)) + 424 // len(TAB_NAMES) - 4, 38))
              for i, name in enumerate(TAB_NAMES))
 PROTECTED_PLUGINS = ('theme_manager',)   # never listed: switching it off would remove the menu itself
@@ -1934,7 +1961,8 @@ def to_screen(m, x, y):
 
 def menu_items(menu):
     tab = menu.get("tab", "themes")
-    return {"themes": menu["names"], "awards": menu["awards"], "layout": menu["layout"], "crack": menu["crack"]}.get(tab, menu["plugins"])
+    return {"themes": menu["names"], "awards": menu["awards"], "layout": menu["layout"], "crack": menu["crack"],
+            "radar": menu["radar"]}.get(tab, menu["plugins"])
 
 
 def adjust_popup(menu):
@@ -1964,7 +1992,7 @@ def menu_hits(menu):
         return [((28, 268, 118, 308), ("refresh", None)), ((124, 268, 214, 308), ("dim", None)),
                 ((28, 166, 236, 200), ("mode", None)), ((242, 166, 452, 200), ("overheat", None)), ((28, 208, 152, 248), ("power", "restart")),
                 ((158, 208, 282, 248), ("power", "reboot")), ((288, 208, 412, 248), ("power", "shutdown"))] + common
-    act = {"themes": "pick", "awards": "award", "layout": "adjust", "crack": "crackrow"}.get(tab, "toggle")
+    act = {"themes": "pick", "awards": "award", "layout": "adjust", "crack": "crackrow", "radar": "radrow"}.get(tab, "toggle")
     hits = [((28, 44 + i * 44, 452, 44 + i * 44 + 40), (act, n))
             for i, n in enumerate(menu_items(menu)[page * MENU_ROWS:(page + 1) * MENU_ROWS])]
     if tab == "layout":
@@ -2088,6 +2116,21 @@ def draw_menu(img, menu, theme):
                 px0, px1 = x1 - 78, x1 - 10
                 d.rounded_rectangle((px0, y0 + 7, px1, y1 - 7), 10, fill=acc if done else panel, outline=acc, width=2)
                 d.text(((px0 + px1) // 2, (y0 + y1) // 2), label, font=_font(14, True), fill=bg if done else fg, anchor="mm")
+        elif act == "radrow":
+            info = menu["radar_info"][arg]
+            if info["kind"] == "summary":
+                d.text((x0 + 6, (y0 + y1) // 2), info["text"], font=_font(14, True), fill=fg, anchor="lm")
+            else:
+                got, hot = info["captured"], info["clients"] > 0
+                name = info["name"] if len(info["name"]) <= 18 else info["name"][:17] + "…"
+                sub = "ch%s  %sdBm  %s" % (info["channel"], info["rssi"], info["encryption"])
+                d.rectangle(rect, fill=line, outline=acc if hot and not got else line, width=2)
+                d.text((x0 + 12, y0 + 12), name, font=_font(16, hot and not got), fill=_mixc(fg, bg, 0.45) if got else fg, anchor="lm")
+                d.text((x0 + 12, y1 - 11), sub, font=_font(11), fill=_mixc(fg, bg, 0.4), anchor="lm")
+                px0, px1 = x1 - 62, x1 - 10
+                d.rounded_rectangle((px0, y0 + 9, px1, y1 - 9), 8, fill=acc if hot and not got else panel, outline=acc, width=2)
+                d.text(((px0 + px1) // 2, (y0 + y1) // 2), "%d STA" % info["clients"],
+                       font=_font(12, True), fill=bg if hot and not got else fg, anchor="mm")
         elif act == "resetall":
             ask = bool(menu.get("confirm")) and menu["confirm"][0] == "resetall"
             d.rectangle(rect, fill=acc if ask else line, outline=acc, width=1)
@@ -2292,7 +2335,7 @@ def draw_toast(img, text, theme):
 
 class ThemeManager(plugins.Plugin):
     __author__ = "theme_manager contributors"
-    __version__ = "2.5.0"
+    __version__ = "2.6.0"
     __license__ = "GPL3"
     __description__ = "Theme engine for the 3.5 inch display: colors, effects, animations, custom text, web GUI."
 
@@ -2321,6 +2364,9 @@ class ThemeManager(plugins.Plugin):
         self._settings = clean_settings({})
         self._settings_mtime = 0
         self._layout = {}
+        self._radar = []
+        self._radar_at = 0
+        self._radar_lock = threading.Lock()
         self._hot_since = 0
         self._shutdown_at = 0
         self._snooze_until = 0
@@ -2650,6 +2696,8 @@ class ThemeManager(plugins.Plugin):
                 self._fill_status(menu)
             elif menu.get("tab") == "crack" and menu["mode"] == "list":
                 self._sync_crack_menu(menu)
+            elif menu.get("tab") == "radar" and menu["mode"] == "list":
+                self._sync_radar_menu(menu)
             draw_menu(img, menu, self._theme)
         toast = self._toast
         if toast is not None:
@@ -2717,13 +2765,14 @@ class ThemeManager(plugins.Plugin):
             self._menu = {"mode": mode, "tab": tab if tab in TAB_NAMES else "themes", "page": 0,
                           "pages": {t: 0 for t in TAB_NAMES}, "confirm": None, "awards_on": self._settings["achievements"],
                           "awards": [a[0] for a in ACHIEVEMENTS] if self._settings["achievements"] else [], "layout": [], "layout_info": {},
-                          "crack": [], "crack_info": {},
+                          "crack": [], "crack_info": {}, "radar": [], "radar_info": {},
                           "award_info": {r["id"]: r for r in self.award_rows()}, "plugins": self._plugin_names(),
                           "on": set(plugins.loaded), "busy": set(), "failed": set(), "step": 0, "raw": [], "names": list(themes),
                           "colors": {n: t for n, t in themes.items()}, "active": self._active,
                           "until": now + (CALIB_TIMEOUT if mode == "calib" else MENU_TIMEOUT)}
         self._sync_layout_menu(self._menu)
         self._sync_crack_menu(self._menu)
+        self._sync_radar_menu(self._menu)
         self._wake.set()
         self._refresh_now()
 
@@ -2737,6 +2786,16 @@ class ThemeManager(plugins.Plugin):
             order.append(r["file"])
         menu["crack"] = order
         menu["crack_info"] = info
+
+    def _sync_radar_menu(self, menu):
+        rows, age = self.radar_rows()
+        info = {"__summary__": {"kind": "summary", "text": _radar_summary_text(rows, age)}}
+        order = ["__summary__"]
+        for r in rows:
+            info[r["mac"]] = dict(r, kind="row")
+            order.append(r["mac"])
+        menu["radar"] = order
+        menu["radar_info"] = info
 
     def _sync_layout_menu(self, menu):
         rows = self.layout_rows()
@@ -3140,6 +3199,15 @@ class ThemeManager(plugins.Plugin):
                                 "uploaded": "uploaded, not cracked yet", "queued": "waiting to upload",
                                 "unknown": "status unknown (wpa-sec plugin not active)"}
                         self.toast(msgs.get(info["status"], "?"), seconds=4, now=now)
+                        self._refresh_now()
+                    return
+                elif act == "radrow":
+                    info = menu["radar_info"].get(arg)
+                    if info and info["kind"] == "row":
+                        msg = "%s: %s, %d clients, %d dBm" % (info["name"], info["encryption"], info["clients"], info["rssi"])
+                        if info["captured"]:
+                            msg += " (already have a handshake)"
+                        self.toast(msg, seconds=4, now=now)
                         self._refresh_now()
                     return
                 elif act == "cal":
@@ -3594,6 +3662,31 @@ class ThemeManager(plugins.Plugin):
         self._event_until = time.time() + HANDSHAKE_FLASH
         self._wake.set()
 
+    def on_wifi_update(self, agent, access_points):
+        """pwnagotchi calls this with every network it currently sees, each time it looks. We only ever read it, to
+        rank and display; nothing here feeds back into what gets attacked."""
+        try:
+            captured = {r["bssid"] for r in crack_rows() if r.get("bssid")}
+            rows = []
+            for ap in access_points:
+                mac = (ap.get("mac") or "").lower()
+                rows.append({"mac": mac, "name": ap.get("hostname") or "(hidden)", "channel": ap.get("channel", 0),
+                             "rssi": ap.get("rssi", -100), "clients": len(ap.get("clients") or []),
+                             "encryption": ap.get("encryption") or "?", "captured": mac.replace(":", "") in captured,
+                             "score": _ap_score(ap, captured)})
+            rows.sort(key=lambda r: -r["score"])
+            with self._radar_lock:
+                self._radar = rows[:RADAR_MAX]
+                self._radar_at = time.time()
+        except Exception as e:
+            logging.debug("[theme_manager] wifi update: %s", e)
+
+    def radar_rows(self):
+        """(rows, age in seconds since the last scan, or None before the first one)."""
+        with self._radar_lock:
+            rows, at = list(self._radar), self._radar_at
+        return rows, (time.time() - at if at else None)
+
     def on_unload(self, ui):
         self._running = False
         if self._ach_dirty:
@@ -3665,6 +3758,10 @@ class ThemeManager(plugins.Plugin):
         if path == "api/cracking":
             rows = crack_rows()
             return jsonify({"summary": crack_summary(rows), "rows": rows[:200], "wpa_sec": _wpa_db_status() is not None})
+
+        if path == "api/radar":
+            rows, age = self.radar_rows()
+            return jsonify({"rows": rows, "age": age})
 
         if path == "api/backup":
             self._stat("backups", add=1)
@@ -3900,7 +3997,7 @@ const KINDS=SCENE_KINDS_JS;
 const ANIM=['pulse','rainbow','glitch','rain','stars','noise'];
 const MOODS=['look_r','sleep','awake','bored','intense','cool','happy','grateful','excited','motivated','demotivated','smart','lonely','sad','angry','friend','broken','debug','upload','handshake'];
 const HOLDERS=['{name}','{time}','{date}','{cpu}','{temp}','{mem}','{uptime}','{ip}','{mode}','{gps}','{lat}','{lon}','{sats}','{handshakes}','{cracked}','{session}','{power}','{battery}'];
-const TABS=['Colors','Effects','Text','Elements','Moods','Faces','JSON','Layout','Awards','Cracking','Settings'];
+const TABS=['Colors','Effects','Text','Elements','Moods','Faces','JSON','Layout','Awards','Cracking','Radar','Settings'];
 let S={active:'',themes:{}},sel='',cur={},info={elements:[],entities:[],packs:{}},tab='Colors',mood='sad',pvMood=null,busy=false,dirty=false,pvErr=false,timer=null;
 const say=t=>$('msg').textContent=t||'';
 /* After the plugin restarts (or the browser loses its session) the page's token is stale: fetch a fresh one and retry once. */
@@ -4114,6 +4211,19 @@ function panelCracking(){const p=E('div'),s=crack.summary;
    E('span',{class:'inh',style:'flex:1'},r.status==='cracked'?r.password:(r.bssid||'')),
    E('span',{style:'padding:2px 10px;border-radius:10px;font-size:11px;background:'+(done?'var(--acc)':'transparent')+';border:1px solid var(--acc);color:'+(done?'var(--bg)':'var(--text)')},label)))}
  return p}
+let radar={rows:[],age:null};
+async function loadRadar(){try{radar=await(await fetch(base+'/api/radar')).json()}catch(e){}}
+function panelRadar(){const p=E('div');
+ p.append(E('p',{style:'color:var(--dim);margin:0 0 10px'},'Networks pwnagotchi currently sees, ranked by signal and client count (a rough guess at which ones are worth the time). '+
+  'Display only: nothing here changes what actually gets attacked. Also on the device: touch menu, Radar tab.'+
+  (radar.age==null?' No scan yet.':radar.age>120?' Last scan '+Math.round(radar.age/60)+' min ago.':'')));
+ if(!radar.rows.length){p.append(E('p',{style:'color:var(--dim)'},'No networks seen yet.'));return p}
+ for(const r of radar.rows){
+  p.append(E('div',{class:'erow'+(r.captured?'':' set'),style:r.captured?'opacity:.55':''},
+   E('span',{class:'ename',style:'width:170px'},r.name),
+   E('span',{class:'inh',style:'flex:1'},'ch'+r.channel+'  '+r.rssi+'dBm  '+r.encryption+(r.captured?'  (have a handshake)':'')),
+   E('span',{style:'padding:2px 10px;border-radius:10px;font-size:11px;border:1px solid var(--acc);background:'+(r.clients&&!r.captured?'var(--acc)':'transparent')+';color:'+(r.clients&&!r.captured?'var(--bg)':'var(--text)')},r.clients+' STA')))}
+ return p}
 let cfg={settings:{},display:{dim:1,night:null,idle:null},limits:{}};
 async function loadSettings(){try{cfg=await(await fetch(base+'/api/settings')).json()}catch(e){}}
 async function saveSettings(){const j=await(await post('settings',{settings:cfg.settings,display:cfg.display})).json();
@@ -4136,9 +4246,9 @@ function panelSettings(){const p=E('div'),s=cfg.settings,d=cfg.display;
   idleOn?[field('after (minutes)',num(d.idle.minutes,v=>d.idle.minutes=v,1,240)),slider('dim to',[5,100,5],Math.round(d.idle.dim*100),v=>{d.idle.dim=v/100})]:null));
  p.append(E('div',{class:'row'},E('button',{id:'setsave',onclick:saveSettings},'Save settings')));
  return p}
-const PANELS={Colors:panelColors,Effects:panelEffects,Text:panelText,Elements:panelElements,Moods:panelMoods,Faces:panelFaces,JSON:panelJson,Layout:panelLayout,Awards:panelAwards,Cracking:panelCracking,Settings:panelSettings};
+const PANELS={Colors:panelColors,Effects:panelEffects,Text:panelText,Elements:panelElements,Moods:panelMoods,Faces:panelFaces,JSON:panelJson,Layout:panelLayout,Awards:panelAwards,Cracking:panelCracking,Radar:panelRadar,Settings:panelSettings};
 function panel(){const p=$('panel');p.innerHTML='';p.append(PANELS[tab]());
- const t=$('tabs');t.innerHTML='';for(const n of TABS)t.append(E('button',{class:n===tab?'on':'',onclick:async()=>{tab=n;pickKey=null;$('pick').innerHTML='';$('pick').className='';pvMood=n==='Moods'?mood:null;if(n==='Elements'||n==='Moods'){try{info.entities=await(await fetch(base+'/api/entities')).json()}catch(e){}}if(n==='Layout')await loadLayout();if(n==='Awards')await loadAwards();if(n==='Cracking')await loadCracking();if(n==='Settings')await loadSettings();panel();overlay();schedule()}},n))}
+ const t=$('tabs');t.innerHTML='';for(const n of TABS)t.append(E('button',{class:n===tab?'on':'',onclick:async()=>{tab=n;pickKey=null;$('pick').innerHTML='';$('pick').className='';pvMood=n==='Moods'?mood:null;if(n==='Elements'||n==='Moods'){try{info.entities=await(await fetch(base+'/api/entities')).json()}catch(e){}}if(n==='Layout')await loadLayout();if(n==='Awards')await loadAwards();if(n==='Cracking')await loadCracking();if(n==='Radar')await loadRadar();if(n==='Settings')await loadSettings();panel();overlay();schedule()}},n))}
 
 /* ---- drag text lines on the preview ---- */
 const est=t=>(t||'').replace(/\{time\}/g,'00:00:00').replace(/\{date\}/g,'0000-00-00').replace(/\{\w+\}/g,'0000').length;

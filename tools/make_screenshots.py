@@ -82,9 +82,19 @@ crack_rows = [
 crack_info = {"__summary__": {"kind": "summary", "text": T._crack_summary_text(T.crack_summary(crack_rows))}}
 crack_info.update({r["file"]: dict(r, kind="row") for r in crack_rows})
 menu.update(crack=["__summary__"] + [r["file"] for r in crack_rows], crack_info=crack_info)
+# a radar with made-up nearby networks (never the real ones)
+radar_rows = [
+    {"mac": "02:00:00:00:00:01", "name": "CoffeeShop", "channel": 6, "rssi": -45, "clients": 3, "encryption": "WPA2", "captured": False},
+    {"mac": "02:00:00:00:00:02", "name": "SecureNet", "channel": 1, "rssi": -50, "clients": 2, "encryption": "WPA3", "captured": False},
+    {"mac": "02:00:00:00:00:03", "name": "HomeNet", "channel": 6, "rssi": -55, "clients": 4, "encryption": "WPA2", "captured": True},
+    {"mac": "02:00:00:00:00:04", "name": "(hidden)", "channel": 11, "rssi": -80, "clients": 0, "encryption": "WPA2", "captured": False},
+]
+radar_info = {"__summary__": {"kind": "summary", "text": T._radar_summary_text(radar_rows, 2.0)}}
+radar_info.update({r["mac"]: dict(r, kind="row") for r in radar_rows})
+menu.update(radar=["__summary__"] + [r["mac"] for r in radar_rows], radar_info=radar_info)
 for name, extra in (("menu-themes.png", {"tab": "themes", "page": 1}), ("menu-plugins.png", {"tab": "plugins", "busy": {"bt-tether"}}),
                     ("menu-system.png", {"tab": "system", "overheat": True}), ("menu-awards.png", {"tab": "awards"}),
-                    ("menu-layout.png", {"tab": "layout", "page": 1}), ("menu-crack.png", {"tab": "crack"}),
+                    ("menu-layout.png", {"tab": "layout", "page": 1}), ("menu-crack.png", {"tab": "crack"}), ("menu-radar.png", {"tab": "radar"}),
                     ("menu-adjust.png", {"mode": "adjust", "adjust": "face", "offset": (12, 6), "box": (25, 52, 252, 122), "step_px": 5})):
     render("cyberpunk", menu=dict(menu, **extra)).save(os.path.join(OUT, name), optimize=True)
 

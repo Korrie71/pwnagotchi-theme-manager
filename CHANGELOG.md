@@ -1,5 +1,12 @@
 # Changelog
 
+## 2.6.0
+
+**Radar.** A new **Radar** tab in the touch menu and the web editor ranks the networks pwnagotchi currently sees:
+signal, client count and encryption combine into a rough "worth attacking" score (a network already cracked, or
+WPA3-only, ranks lower). Tap one for its channel, signal and client count. Display only: it reads the same
+`on_wifi_update` data pwnagotchi already collects and never changes what actually gets attacked. Web API: `api/radar`.
+
 ## 2.5.0
 
 **Cracking dashboard.** A new **Crack** tab in the touch menu and the web editor lists every captured handshake,

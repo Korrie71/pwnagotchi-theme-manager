@@ -35,6 +35,7 @@ with pwnagotchi's mood. Themes are small JSON files you can edit in a web editor
 - **Face packs:** replace the text face with PNG or GIF images per mood, in color or tinted by the theme
 - **Web editor** with live preview: sliders, gradient picker, drag-to-place text, click a part of the preview to recolor it, import/export
 - **Touch menu:** double tap the screen to switch themes (or just swipe sideways), enable/disable pwnagotchi plugins on the fly, or see system status and restart/reboot/shut down
+- **Radar:** the networks pwnagotchi currently sees, ranked by signal and client count (display only, never touches attacks)
 - **Cracking dashboard:** every captured handshake with its upload/crack status (from the `wpa-sec` plugin), on the screen and in the editor
 - **Move anything on the screen:** tap an element in the touch menu and nudge it with small `+` and `-` buttons (or do it in the web editor)
 - **Achievements:** unlock them for handshakes, uptime, themes tried and more, on the screen and in the editor
@@ -74,6 +75,9 @@ And more, each with its own scenery: a Star Trek console, the seasons, landscape
 <img src="docs/images/menu-awards.png" width="32%" alt="Awards tab">
 <img src="docs/images/menu-layout.png" width="32%" alt="Layout tab">
 <img src="docs/images/menu-crack.png" width="32%" alt="Crack tab, a cracking dashboard">
+</p>
+<p>
+<img src="docs/images/menu-radar.png" width="32%" alt="Radar tab, ranking nearby networks">
 </p>
 
 **Web editor** with a live preview: drag text lines on the preview, or click a part of the screen to recolor it.
@@ -125,8 +129,8 @@ enabled = true
 
 **Web editor:** open `http://<pi-address>:8080/plugins/theme_manager/`. Pick a theme, change colors and effects, drag text
 lines on the preview, click a part of the screen to recolor it, then **Apply to screen**. Themes you save appear in the list.
-The **Layout**, **Awards**, **Cracking** and **Settings** tabs (overheating auto-off, achievements, brightness and night
-mode) are about the device rather than the theme.
+The **Layout**, **Awards**, **Cracking**, **Radar** and **Settings** tabs (overheating auto-off, achievements,
+brightness and night mode) are about the device rather than the theme.
 
 **Command line** (use pwnagotchi's Python):
 
@@ -154,6 +158,7 @@ $P cracking              # handshake upload/crack counts as JSON (or: cracking l
 | **Awards** | the achievements with your progress; tap one to see what it asks for |
 | **Layout** | every element on the screen; tap one to move it with `X -` `X +` `Y -` `Y +` (1, 5 or 10 pixels per tap), `reset` and `done`; `clear` puts everything back |
 | **Crack** | every captured handshake with a status pill (`PWND`/`WAIT`/`NEW`/`BAD`/`?`); tap one for the password or what it's waiting on |
+| **Radar** | networks pwnagotchi currently sees, ranked by a rough "worth attacking" score; tap one for its channel, signal and client count |
 
 Swipe sideways on the bare screen to change theme. `close`, a tap outside the menu, or 20 seconds of nothing closes it. It costs nothing while idle: one thread sleeps until
 the screen is touched.
@@ -209,7 +214,7 @@ python tests/run_all.py            # or run any tests/test_*.py on its own
 ```
 
 They cover theme validation and rendering (including a fuzz test), per-element colors, moods, face packs, the touch
-menu and calibration, plugin switching, the System tab, achievements, the layout mover, the cracking dashboard, the web API, the placeholders, the install script, and a scan that keeps
+menu and calibration, plugin switching, the System tab, achievements, the layout mover, the cracking dashboard, the radar, the web API, the placeholders, the install script, and a scan that keeps
 personal data out of the repository. The tools in [`tools/`](tools) regenerate the screenshots and the demo GIF from
 made-up data. GitHub Actions runs the tests on every push.
 

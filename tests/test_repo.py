@@ -61,7 +61,8 @@ for f in text_files:
         if "noreply" not in m.group(0) and not m.group(0).endswith(("@example.com", "@users.noreply.github.com")):
             problems.append((f, "email", m.group(0)))
     for m in re.finditer(r"\b(?:[0-9a-fA-F]{2}:){5}[0-9a-fA-F]{2}\b", body):
-        problems.append((f, "MAC address", m.group(0)))
+        if not m.group(0).lower().startswith("02:00:00:00:00:"):   # the project's fake, locally-administered range for test data
+            problems.append((f, "MAC address", m.group(0)))
     for m in re.finditer(r"\b192\.168\.\d+\.\d+\b|\b10\.\d+\.\d+\.\d+\b", body):
         problems.append((f, "private IP", m.group(0)))
     for m in re.finditer(r"gh[pousr]_[A-Za-z0-9]{20,}|api_key\s*=\s*\"[^\"]+\"|password\s*=\s*\"[^\"]+\"", body):
