@@ -1,5 +1,11 @@
 # Changelog
 
+## 2.7.1
+
+Fixed a JS syntax error (a double-escaped apostrophe in the Cracking tab's text) that broke the entire web editor,
+not just that tab: no theme cards, no preview, nothing. Shipped in 2.6.0, only in code paths the Python test suite
+can't reach; added real-browser tests for the Cracking and Radar tabs so this class of bug is caught before release.
+
 ## 2.7.0
 
 **Touch menu:** the tab bar now scrolls (`<`/`>`) instead of cramming every tab into a fixed width; each tab keeps a
