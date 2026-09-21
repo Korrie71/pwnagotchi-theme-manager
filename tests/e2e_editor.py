@@ -234,6 +234,17 @@ with sync_playwright() as p:
     page.wait_for_selector(".award")
     check("the Awards tab lists every achievement with its progress", page.locator(".award").count() >= 15 and page.locator(".award.done").count() >= 1)
 
+    cracking0 = requests.get(URL + "api/cracking").json()
+    tab("Cracking")
+    page.wait_for_selector(".card")
+    check("the Cracking tab shows the summary cards", page.locator(".statcard").count() == 5)
+    check("...and matches the API's counts", page.locator(".statcard div").first.inner_text() == str(cracking0["summary"]["cracked"]))
+
+    tab("Radar")
+    page.wait_for_timeout(300)
+    check("the Radar tab loads with no browser error (empty or listing networks)",
+          page.locator("p:has-text('Networks pwnagotchi')").count() == 1)
+
     settings0 = requests.get(URL + "api/settings").json()
     tab("Settings")
     page.wait_for_selector("#setsave")

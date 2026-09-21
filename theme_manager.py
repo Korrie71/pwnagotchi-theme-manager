@@ -4262,11 +4262,11 @@ function panelAwards(){const p=E('div');
 let crack={summary:{total:0,cracked:0,queued:0,uploaded:0,invalid:0,unknown:0},rows:[],wpa_sec:false};
 async function loadCracking(){try{crack=await(await fetch(base+'/api/cracking')).json()}catch(e){}}
 function panelCracking(){const p=E('div'),s=crack.summary;
- p.append(E('p',{style:'color:var(--dim);margin:0 0 10px'},crack.wpa_sec?'From the wpa-sec plugin\\'s own upload/crack tracking. Read-only: nothing here changes what gets attacked.':
-  'The wpa-sec plugin is not tracking uploads, so only what has actually been cracked is known. Handshakes otherwise show as \\'unknown\\'.'));
+ p.append(E('p',{style:'color:var(--dim);margin:0 0 10px'},crack.wpa_sec?'From the wpa-sec plugin\'s own upload/crack tracking. Read-only: nothing here changes what gets attacked.':
+  'The wpa-sec plugin is not tracking uploads, so only what has actually been cracked is known. Handshakes otherwise show as \'unknown\'.'));
  p.append(E('div',{class:'wpa-stats',style:'display:grid;grid-template-columns:repeat(auto-fit,minmax(90px,1fr));gap:8px;margin-bottom:12px'},
   [['cracked','Cracked'],['queued','Queued'],['uploaded','Uploaded'],['invalid','Invalid'],['total','Total']].map(([k,l])=>
-   E('div',{class:'card',style:'text-align:center;cursor:default'},E('div',{style:'font-size:22px'},String(s[k])),E('small',{style:'color:var(--dim)'},l)))));
+   E('div',{class:'statcard',style:'text-align:center;cursor:default;background:var(--panel);border:1px solid var(--line);border-radius:8px;padding:8px'},E('div',{style:'font-size:22px'},String(s[k])),E('small',{style:'color:var(--dim)'},l)))));
  if(!crack.rows.length){p.append(E('p',{style:'color:var(--dim)'},'No handshakes yet.'));return p}
  const PILL={cracked:['PWND',1],uploaded:['WAIT',0],queued:['NEW',0],invalid:['BAD',0],unknown:['?',0]};
  for(const r of crack.rows){const[label,done]=PILL[r.status]||['?',0];
