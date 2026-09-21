@@ -419,6 +419,12 @@ If the Pi still runs hot, the biggest help is hardware: an active cooler or a fa
 - Face pack images are cached and re-read when the pack folder changes.
 - Share a theme by copying its JSON file (and its face pack folder, if it uses one). Import by putting a `.json` file into `/etc/pwnagotchi/themes/`.
 
+## The first-run notice
+
+The first time the plugin ever runs it shows a legal notice on the screen (authorized use only) and logs it once;
+tap anywhere to dismiss it. It remembers that it was shown in `disclaimer.json`, so it never appears again after that
+(delete that file to see it once more, for example after resetting the device for someone else).
+
 ## Troubleshooting
 
 - **Theme not in the list:** run `validate` on the file. Invalid themes are skipped and the reason is written to

@@ -32,6 +32,7 @@ import shutil
 import socket
 import sqlite3
 import struct
+import textwrap
 import threading
 import time
 import zipfile
@@ -95,7 +96,7 @@ MOOD_FADE = 0.6    # seconds to blend between moods
 HANDSHAKE_FLASH = 4.0
 FORCE_FILE = os.path.join(THEME_DIR, "force_mood.json")
 FACES_DIR = os.path.join(THEME_DIR, "faces")
-STATE_FILES = ("active.json", "force_mood.json", "touch.json", "display.json", "settings.json", "achievements.json", "layout.json")   # JSON files in THEME_DIR that are not themes
+STATE_FILES = ("active.json", "force_mood.json", "touch.json", "display.json", "settings.json", "achievements.json", "layout.json", "disclaimer.json")   # JSON files in THEME_DIR that are not themes
 PACK_RE = re.compile(r"^[A-Za-z0-9_\-]{1,32}$")
 
 # Built-in themes. bg/fg/accent/web are required, everything else is optional.
@@ -1897,9 +1898,24 @@ GPS_TOKENS = ("gps", "lat", "lon", "sats")
 STATUS_LINES = ("CPU {temp}  load {cpu}  RAM {mem}", "IP {ip}", "GPS {gps}  {lat} {lon}",
                 "Up {uptime}  Power {power}  Bat {battery}", "Pwned {handshakes}  Cracked {cracked}  Session {session}")
 TAB_NAMES = ("themes", "plugins", "system", "awards", "layout", "crack", "radar")
-TABS = tuple((name, (28 + i * (424 // len(TAB_NAMES)), 10, 28 + i * (424 // len(TAB_NAMES)) + 424 // len(TAB_NAMES) - 4, 38))
-             for i, name in enumerate(TAB_NAMES))
+TAB_WINDOW = 4      # tabs shown at once before it needs '<'/'>' to see the rest
+TAB_ARROW_W = 36
 PROTECTED_PLUGINS = ('theme_manager',)   # never listed: switching it off would remove the menu itself
+
+
+def tab_layout(scroll):
+    """[(name, rect)] for the tabs currently visible, plus '<'/'>' rects (or None, None if they all fit)."""
+    n = len(TAB_NAMES)
+    if n <= TAB_WINDOW:
+        w = 424 // n
+        return [(name, (28 + i * w, 10, 28 + i * w + w - 4, 38)) for i, name in enumerate(TAB_NAMES)], None, None
+    w = (424 - 2 * TAB_ARROW_W) // TAB_WINDOW
+    x = 28 + TAB_ARROW_W
+    tabs = []
+    for i in range(TAB_WINDOW):
+        tabs.append((TAB_NAMES[(scroll + i) % n], (x, 10, x + w - 4, 38)))
+        x += w
+    return tabs, (28, 10, 28 + TAB_ARROW_W - 4, 38), (x, 10, 452, 38)
 
 
 @contextlib.contextmanager
@@ -1986,7 +2002,10 @@ def menu_hits(menu):
     tab, page = menu.get("tab", "themes"), menu["page"]
     if menu["mode"] == "adjust":
         return adjust_hits(menu)
-    tabs = [(rect, ("tab", name)) for name, rect in TABS]
+    tab_names, left, right = tab_layout(menu.get("tab_scroll", 0))
+    tabs = [(rect, ("tab", name)) for name, rect in tab_names]
+    if left:
+        tabs += [(left, ("tabscroll", -1)), (right, ("tabscroll", 1))]
     common = [((220, 268, 320, 308), ("cal", None)), ((380, 268, 452, 308), ("close", None))] + tabs
     if tab == "system":
         return [((28, 268, 118, 308), ("refresh", None)), ((124, 268, 214, 308), ("dim", None)),
@@ -2077,6 +2096,9 @@ def draw_menu(img, menu, theme):
             d.rectangle(rect, fill=acc if on else line, outline=acc, width=1)
             d.text(((x0 + x1) // 2, (y0 + y1) // 2), arg.capitalize(), font=_font(16, True),
                    fill=bg if on else fg, anchor="mm")
+        elif act == "tabscroll":
+            d.rectangle(rect, fill=line, outline=acc, width=1)
+            d.text(((x0 + x1) // 2, (y0 + y1) // 2), "‹" if arg < 0 else "›", font=_font(18, True), fill=fg, anchor="mm")
         elif act == "pick":
             cur = arg == menu["active"]
             d.rectangle(rect, fill=line, outline=acc if cur else line, width=2)
@@ -2333,9 +2355,28 @@ def draw_toast(img, text, theme):
     d.text((img.width // 2, y0 + 13), text, font=font, fill=fg, anchor="mm")
 
 
+DISCLAIMER_FILE = os.path.join(THEME_DIR, "disclaimer.json")
+DISCLAIMER_TEXT = ("For authorized security testing, research and education only. Only use this on networks and "
+                   "devices you own or have explicit permission to test. You are responsible for complying with "
+                   "all applicable laws.")
+
+
+def draw_notice(img, text, theme):
+    """A one-time full-panel notice the user must tap away, drawn the same way as the calibration prompt."""
+    d = ImageDraw.Draw(img)
+    bg, fg, acc = _hex(theme["bg"]), _hex(theme["fg"]), _hex(theme["accent"])
+    d.rectangle((16, 56, 464, 264), fill=_mixc(bg, (0, 0, 0), 0.35), outline=acc, width=2)
+    d.text((240, 78), "Before you start", font=_font(20, True), fill=fg, anchor="mm")
+    y = 108
+    for line in textwrap.wrap(text, 46):
+        d.text((240, y), line, font=_font(13), fill=fg, anchor="mm")
+        y += 19
+    d.text((240, 242), "tap anywhere to continue", font=_font(13, True), fill=acc, anchor="mm")
+
+
 class ThemeManager(plugins.Plugin):
     __author__ = "theme_manager contributors"
-    __version__ = "2.6.0"
+    __version__ = "2.7.0"
     __license__ = "GPL3"
     __description__ = "Theme engine for the 3.5 inch display: colors, effects, animations, custom text, web GUI."
 
@@ -2355,6 +2396,7 @@ class ThemeManager(plugins.Plugin):
         self._gps = None
         self._gps_wanted = 0
         self._toast = None
+        self._notice = None
         self._ach = clean_achievements(None)
         self._ach_lock = threading.Lock()
         self._ach_dirty = False
@@ -2702,6 +2744,8 @@ class ThemeManager(plugins.Plugin):
         toast = self._toast
         if toast is not None:
             draw_toast(img, toast[0], self._theme)
+        if self._notice:
+            draw_notice(img, self._notice, self._theme)
         return rotate(apply_dim(img, self._dim), self._rot)
 
     def _present(self, img):
@@ -2761,8 +2805,9 @@ class ThemeManager(plugins.Plugin):
         if mode is None:
             mode = "list" if self._touch_m else "calib"
         themes = self._all()
+        tab = tab if tab in TAB_NAMES else "themes"
         with self._menu_lock:
-            self._menu = {"mode": mode, "tab": tab if tab in TAB_NAMES else "themes", "page": 0,
+            self._menu = {"mode": mode, "tab": tab, "page": 0, "tab_scroll": TAB_NAMES.index(tab),
                           "pages": {t: 0 for t in TAB_NAMES}, "confirm": None, "awards_on": self._settings["achievements"],
                           "awards": [a[0] for a in ACHIEVEMENTS] if self._settings["achievements"] else [], "layout": [], "layout_info": {},
                           "crack": [], "crack_info": {}, "radar": [], "radar_info": {},
@@ -3087,6 +3132,10 @@ class ThemeManager(plugins.Plugin):
 
     def on_tap(self, rx, ry, now):
         """A finished tap at raw touch coordinates."""
+        if self._notice:
+            self._notice = None
+            self._refresh_now()
+            return
         menu = self._menu
         if menu is None:
             last = self._last_tap
@@ -3129,6 +3178,8 @@ class ThemeManager(plugins.Plugin):
                     menu["pages"][menu["tab"]] = menu["page"]
                     menu["tab"] = arg
                     menu["page"] = menu["pages"][arg]
+                elif act == "tabscroll":
+                    menu["tab_scroll"] = (menu.get("tab_scroll", 0) + arg) % len(TAB_NAMES)
                 elif act == "resetall":
                     ask = menu.get("confirm")
                     if ask and ask[0] == "resetall" and now <= ask[1]:
@@ -3587,6 +3638,18 @@ class ThemeManager(plugins.Plugin):
         with self._install_lock:
             self._install_locked(display)
 
+    def _maybe_show_disclaimer(self):
+        """The very first time this plugin ever runs, log the disclaimer and show it on screen until tapped away."""
+        if os.path.exists(DISCLAIMER_FILE):
+            return
+        logging.warning("[theme_manager] %s", DISCLAIMER_TEXT)
+        try:
+            os.makedirs(THEME_DIR, exist_ok=True)
+            write_json(DISCLAIMER_FILE, {"shown": time.time()})
+        except OSError as e:
+            logging.debug("[theme_manager] could not save disclaimer.json: %s", e)
+        self._notice = DISCLAIMER_TEXT
+
     def _install_locked(self, display):
         if self._display is display:
             return
@@ -3638,6 +3701,7 @@ class ThemeManager(plugins.Plugin):
         self._load_display()
         self._load_settings()
         self._load_layout()
+        self._maybe_show_disclaimer()
         global STAT_SOURCE
         STAT_SOURCE = self._live_stat
         threading.Thread(target=self._gps_loop, daemon=True, name="theme-gps").start()

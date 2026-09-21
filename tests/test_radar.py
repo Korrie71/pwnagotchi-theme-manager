@@ -77,8 +77,10 @@ finger.calibrate()
 tm2.on_wifi_update(None, [ap("02:00:00:00:00:01", "CoffeeShop", 6, -45, 1, "WPA2"),
                            ap("02:00:00:00:00:02", "GuestWifi", 11, -70, 0, "WPA2")])
 tm2.open_menu("list")
-ok("seven tabs that fit and do not overlap", len(T.TABS) == 7 and all(T.TABS[i][1][2] < T.TABS[i + 1][1][0] for i in range(6)) and T.TABS[-1][1][2] <= 452)
-finger.tap_rect(finger.hit("tab", "radar"))
+tabs0, left0, right0 = T.tab_layout(0)
+rects0 = [left0] + [r for _, r in tabs0] + [right0]
+ok("the visible tabs and the scroll arrows fit and do not overlap", all(rects0[i][2] < rects0[i + 1][0] for i in range(len(rects0) - 1)) and rects0[-1][2] <= 452 and rects0[0][0] >= 28)
+tm2.open_menu("list", "radar")
 ok("the Radar tab opens with a summary row first", tm2._menu["tab"] == "radar" and tm2._menu["radar"][0] == "__summary__")
 ok("...and the networks after it, ranked", tm2._menu["radar"][1] == "02:00:00:00:00:01")
 T.draw_menu(Image.new("RGB", (480, 320)), tm2._menu, tm2._theme)

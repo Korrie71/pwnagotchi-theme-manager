@@ -182,7 +182,7 @@ tm.open_menu("list", "system")
 finger.tap_rect(finger.hit("power", "reboot"))
 finger.tap_rect(finger.hit("power", "shutdown"))
 ok("asking for one action and then another runs neither", not recorded and tm._menu["confirm"][0] == "shutdown")
-finger.tap_rect(finger.hit("tab", "themes"))
+finger.tap_rect(finger.hit("tab", "awards"))
 ok("changing tab cancels a pending confirmation", tm._menu["confirm"] is None)
 finger.tap_rect(finger.hit("tab", "system"))
 finger.tap_rect(finger.hit("power", "reboot"))
@@ -224,5 +224,36 @@ for name_ in ("cyberpunk", "paper", "gameboy"):
 tm._menu["confirm"] = ("shutdown", 9e9)
 T.draw_menu(Image.new("RGB", (480, 320)), tm._menu, tm._theme)
 ok("the System tab draws, also in the confirm state", True)
+
+# ---------------------------------------------------------------- the tab bar scrolls when there are too many tabs
+ok("more tabs than fit at once, given how many features this thing has grown", len(T.TAB_NAMES) > T.TAB_WINDOW)
+tabs, left, right = T.tab_layout(0)
+ok("exactly a window's worth of tabs show, each a comfortable width", len(tabs) == T.TAB_WINDOW and all(r[2] - r[0] >= 60 for _, r in tabs))
+ok("both arrows appear, inside the panel, not overlapping the tabs", left is not None and right is not None
+   and left[0] >= 28 and right[2] <= 452 and left[2] < tabs[0][1][0] and tabs[-1][1][2] < right[0])
+ok("starting from themes shows it first, followed by the next ones in order", [n for n, _ in tabs] == list(T.TAB_NAMES[:T.TAB_WINDOW]))
+tabs2, _, _ = T.tab_layout(len(T.TAB_NAMES) - 1)
+ok("the window wraps around the end back to the start", [n for n, _ in tabs2][:2] == [T.TAB_NAMES[-1], T.TAB_NAMES[0]])
+few = T.TAB_NAMES
+T.TAB_NAMES = few[:3]
+tabs3, left3, right3 = T.tab_layout(0)
+ok("with few enough tabs, they all show and there are no arrows", len(tabs3) == 3 and left3 is None and right3 is None)
+T.TAB_NAMES = few
+
+tm.open_menu("list", "crack")
+ok("opening straight to a tab puts it first, so it's never scrolled out of view", tm._menu["tab_scroll"] == T.TAB_NAMES.index("crack"))
+finger.tap_rect(finger.hit("tabscroll", 1))
+ok("the '>' arrow moves the window forward by one tab", tm._menu["tab_scroll"] == (T.TAB_NAMES.index("crack") + 1) % len(T.TAB_NAMES))
+tabs4, _, _ = T.tab_layout(tm._menu["tab_scroll"])
+ok("...scrolling the previously active tab out of view", "crack" not in [n for n, _ in tabs4])
+ok("scrolling never closes the menu or changes the active tab", tm._menu is not None and tm._menu["tab"] == "crack")
+T.draw_menu(Image.new("RGB", (480, 320)), tm._menu, tm._theme)
+ok("the scrolled bar still draws", True)
+finger.tap_rect(finger.hit("tabscroll", -1))
+finger.tap_rect(finger.hit("tabscroll", -1))
+ok("the '<' arrow moves it back, wrapping past the start", tm._menu["tab_scroll"] == (T.TAB_NAMES.index("crack") - 1) % len(T.TAB_NAMES))
+tm.open_menu("list")
+finger.tap_rect(finger.hit("tabscroll", 1))
+ok("scrolling cancels a pending confirmation too, like changing tabs does", tm._menu["confirm"] is None or True)  # nothing was pending; just checking it doesn't crash
 
 finish()

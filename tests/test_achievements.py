@@ -154,8 +154,11 @@ finger.calibrate()
 tm._stat("handshakes", add=12)
 tm._ach["stats"]["uptime_seconds"] = 5400
 tm.open_menu("list")
-ok("every tab is inside the panel", len(T.TABS) == len(T.TAB_NAMES) and "awards" in T.TAB_NAMES and all(r[2] <= 452 for _, r in T.TABS) and all(r[0] >= 28 for _, r in T.TABS))
-ok("the tabs do not overlap", all(T.TABS[i][1][2] < T.TABS[i + 1][1][0] for i in range(len(T.TABS) - 1)))
+ok("awards is one of the tabs", "awards" in T.TAB_NAMES)
+tabs0, left0, right0 = T.tab_layout(0)
+rects0 = [left0] + [r for _, r in tabs0] + [right0]
+ok("every tab and arrow is inside the panel and none overlap", all(r[2] <= 452 and r[0] >= 28 for r in rects0)
+   and all(rects0[i][2] < rects0[i + 1][0] for i in range(len(rects0) - 1)))
 finger.tap_rect(finger.hit("tab", "awards"))
 ok("the Awards tab opens", tm._menu["tab"] == "awards" and len(tm._menu["awards"]) == len(T.ACHIEVEMENTS))
 rows = [r for r in T.menu_hits(tm._menu) if r[1][0] == "award"]

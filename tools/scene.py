@@ -65,7 +65,7 @@ def draw(face):
     manager._on_frame(canvas)
 
 
-def render(theme, face=None, mood=None, t=0.7, menu=None):
+def render(theme, face=None, mood=None, t=0.7, menu=None, notice=None):
     """One frame of `theme` (a built-in name or a theme dict) with the given face on screen."""
     face = face or faces.AWAKE
     draw(face)
@@ -76,6 +76,8 @@ def render(theme, face=None, mood=None, t=0.7, menu=None):
     img = T.colorize(ctx["canvas"], effective, t, ctx["layers"], manager._face_frame(effective, t))
     if menu:
         T.draw_menu(img, menu, th)
+    if notice:
+        T.draw_notice(img, notice, th)
     return img
 
 

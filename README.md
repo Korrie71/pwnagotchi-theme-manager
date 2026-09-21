@@ -22,7 +22,7 @@ with pwnagotchi's mood. Themes are small JSON files you can edit in a web editor
 ## Contents
 
 [Features](#features) · [Screenshots](#screenshots) · [Install](#install) · [Use](#use) · [Make your own theme](#make-your-own-theme) ·
-[Known limits](#known-limits) · [How it works](#how-it-works) · [Development](#development) · [Contributing](#contributing) · [License](#license)
+[Known limits](#known-limits) · [How it works](#how-it-works) · [Development](#development) · [Contributing](#contributing) · [Legal](#legal) · [License](#license)
 
 ## Features
 
@@ -222,6 +222,15 @@ made-up data. GitHub Actions runs the tests on every push.
 
 Themes, face packs, bug reports and ideas are welcome, see [CONTRIBUTING.md](CONTRIBUTING.md). Please never post
 screenshots or logs that show your device name, network names or addresses.
+
+## Legal
+
+pwnagotchi itself, and the `wpa-sec`, cracking dashboard and radar features this plugin adds a view onto, are for
+**authorized security testing, research and education only**. Only use them on networks and devices you own or have
+explicit permission to test. You are responsible for complying with all applicable laws; the authors and contributors
+take no responsibility for misuse. The plugin shows this once, on its first run, on the device's own screen:
+
+<p align="center"><img src="docs/images/menu-notice.png" width="60%" alt="The first-run notice"></p>
 
 ## License
 

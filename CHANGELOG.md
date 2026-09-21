@@ -1,5 +1,13 @@
 # Changelog
 
+## 2.7.0
+
+**Touch menu:** the tab bar now scrolls (`<`/`>`) instead of cramming every tab into a fixed width; each tab keeps a
+comfortable, readable size no matter how many features get added.
+
+**Legal notice.** The first time the plugin ever runs it shows a one-time notice on the screen (authorized use only)
+and logs it once; tap anywhere to dismiss it. See the Legal section in the README.
+
 ## 2.6.0
 
 **Radar.** A new **Radar** tab in the touch menu and the web editor ranks the networks pwnagotchi currently sees:

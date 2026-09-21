@@ -96,6 +96,9 @@ for name, extra in (("menu-themes.png", {"tab": "themes", "page": 1}), ("menu-pl
                     ("menu-system.png", {"tab": "system", "overheat": True}), ("menu-awards.png", {"tab": "awards"}),
                     ("menu-layout.png", {"tab": "layout", "page": 1}), ("menu-crack.png", {"tab": "crack"}), ("menu-radar.png", {"tab": "radar"}),
                     ("menu-adjust.png", {"mode": "adjust", "adjust": "face", "offset": (12, 6), "box": (25, 52, 252, 122), "step_px": 5})):
-    render("cyberpunk", menu=dict(menu, **extra)).save(os.path.join(OUT, name), optimize=True)
+    shown = dict(menu, **extra)
+    shown["tab_scroll"] = T.TAB_NAMES.index(shown["tab"]) if shown["tab"] in T.TAB_NAMES else 0
+    render("cyberpunk", menu=shown).save(os.path.join(OUT, name), optimize=True)
+render("cyberpunk", notice=T.DISCLAIMER_TEXT).save(os.path.join(OUT, "menu-notice.png"), optimize=True)
 
 print("wrote", ", ".join(sorted(f for f in os.listdir(OUT) if f.endswith(".png") and not f.startswith("editor"))))
