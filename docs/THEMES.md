@@ -312,11 +312,6 @@ Tap a row to see what it asks for.
 
 **Layout** lists everything on the screen so you can move it (see "Moving things on the screen").
 
-**Radar** ranks the networks pwnagotchi currently sees by signal, client count and encryption (a network already
-cracked, or WPA3-only, ranks lower), so you can tell at a glance what is worth waiting for. Tap one for its channel,
-signal and client count. It only reads what pwnagotchi already collects (the same data behind the `aps`/`sta` counters)
-and never changes what gets attacked; the web editor has the same list in its Radar tab.
-
 **Crack** is a cracking dashboard: a summary line (cracked / queued / invalid, from the `wpa-sec` plugin if it is
 installed and enabled) followed by every captured handshake, newest first, each with a colored status pill: `PWND`
 (cracked, tap it to see the password), `WAIT` (uploaded, not cracked yet), `NEW` (waiting to upload), `BAD` (wpa-sec

@@ -1,5 +1,10 @@
 # Changelog
 
+## 2.9.0
+
+**Removed the Radar.** The network-ranking tab and its API/editor tab are gone. It was harmless (display-only,
+never touched what got attacked) but not worth the screen space it took from other tabs.
+
 ## 2.8.0
 
 **Handshake quality.** Each capture in the Cracking dashboard now also gets a local quality guess, without waiting
