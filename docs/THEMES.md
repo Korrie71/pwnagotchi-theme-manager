@@ -114,13 +114,13 @@ moving layer. `strength` fades the scenery toward the plain background, `speed` 
 | `halloween` | big moon, a dead tree, gravestones | bats |
 | `christmas` | pines with stars and snow | blinking lights, snow |
 | `space` | nebulae and a ringed planet | |
-| `startrek` | console bars along the edges and a planet | warp streaks |
+| `startrek` | console bars along the edges and a planet | warp streaks, an occasional ship flying past |
 | `city` | a neon skyline | |
 | `vaporwave` | striped sun over a grid | the grid glides |
 | `bloodmoon` | a red moon and a dead tree | |
 | `pixel` | blocky hills and clouds in handheld greens | |
 
-A few scenes (`ocean`, `forest`, `desert`, `winter`) also have a small animal wandering through them, the way a
+A few scenes (`ocean`, `forest`, `desert`, `winter`, `startrek`) also have a small animal or ship passing through, the way a
 Flipper Zero's dolphin turns up in its own UI — not every scene, just a handful, so it stays a nice surprise rather
 than clutter.
 

@@ -1,4 +1,4 @@
-"""A small animal in a few themes (not all of them): dolphin, fox, scorpion, penguin."""
+"""A small animal (or a ship) in a few themes (not all of them): dolphin, fox, scorpion, penguin, starship."""
 import math
 import time
 
@@ -23,8 +23,8 @@ def changed(img):
 
 
 # ---------------------------------------------------------------- which themes got one, and which didn't
-sprited = {"ocean", "forest", "desert", "winter"}
-ok("a few scenes got an animal, most did not", sprited < set(T.SCENE_KINDS))
+sprited = {"ocean", "forest", "desert", "winter", "startrek"}
+ok("a few scenes got an animal or a ship, most did not", sprited < set(T.SCENE_KINDS))
 ok("desert is newly animated because of it (it had no motion before)", "desert" in T.ANIM_SCENES)
 th = T._clean(dict(T.BUILTIN["default"], effects=[{"type": "scene", "kind": "desert"}]))
 ok("...so is_animated agrees", T.is_animated(th))
@@ -39,6 +39,14 @@ ok("...and not drawn the rest (it's underwater, not just invisible)", seen_under
 # ---------------------------------------------------------------- the animals draw, and patrol within a bounded range
 for name, fn in (("fox", T._dyn_fox), ("scorpion", T._dyn_scorpion), ("penguin", T._dyn_penguin)):
     ok("%s: draws something across a range of times" % name, any(changed(draw(fn, i * 0.3)) for i in range(20)))
+
+# ---------------------------------------------------------------- the ship: an occasional flyby, not a fixture
+ship_seen = [changed(draw(T._dyn_ship, i * 0.5)) for i in range(60)]
+ok("the ship is drawn part of the time...", any(ship_seen))
+ok("...and hidden most of the time (a flyby, not a constant fixture)", ship_seen.count(True) < len(ship_seen) * 0.3, ship_seen.count(True))
+ok("it clears the face and the planet (stays out of the busy middle of the screen)",
+   all(ImageChops.difference(draw(T._dyn_ship, i * 0.3), frame()).getbbox() is None or
+       ImageChops.difference(draw(T._dyn_ship, i * 0.3), frame()).getbbox()[1] > 130 for i in range(40)))
 
 fox_xs = []
 for i in range(80):

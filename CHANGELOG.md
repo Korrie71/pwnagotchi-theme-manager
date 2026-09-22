@@ -1,5 +1,14 @@
 # Changelog
 
+## 2.11.1
+
+Feedback from someone who tried the touch menu: everything was clean and easy, but the navigation felt finicky.
+With the tab bar back to 6 tabs (radar is gone), only 4 showed at once, so reaching some of them took two taps of
+the scroll arrow. It now shows 5 at a time, so any tab is one tap away.
+
+Also added a ship to the `startrek` scene: it flies past every so often, not a constant fixture, the same idea as
+the ocean's dolphin, forest's fox, desert's scorpion and winter's penguin.
+
 ## 2.11.0
 
 **Location memory.** The Cracking dashboard now shows where a handshake was captured, if pwnagotchi's own `gps`

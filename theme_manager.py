@@ -1412,6 +1412,23 @@ def _dyn_warp(img, d, w, h, t, sp):
         d.line([(cx + math.cos(ang) * r0, cy + math.sin(ang) * r0 * 0.7), (cx + math.cos(ang) * r1, cy + math.sin(ang) * r1 * 0.7)], fill=col, width=1)
 
 
+def _dyn_ship(img, d, w, h, t, sp):
+    """A ship glides past, high and fast, every so often -- not a constant fixture."""
+    period = max(1.0, 22.0 / sp)
+    phase = (t % period) / period
+    if phase > 0.22:
+        return
+    travel = phase / 0.22
+    x = -50 + travel * (w + 100)
+    y = 148 + 10 * math.sin(travel * math.pi)
+    col, glow = (215, 220, 235), (255, 210, 140)
+    d.ellipse((x - 9, y - 5, x + 11, y + 5), fill=col)                                       # saucer
+    d.polygon([(x - 4, y + 2), (x + 22, y + 3), (x + 26, y + 7), (x - 2, y + 8)], fill=col)   # hull
+    for dy in (-8, 9):
+        d.ellipse((x + 8, y + dy, x + 30, y + dy + 5), fill=col)                             # nacelle
+        d.ellipse((x + 27, y + dy + 1, x + 31, y + dy + 4), fill=glow)                        # engine glow
+
+
 CHRISTMAS_TREES = ((46, 88), (128, 64), (330, 76), (420, 96))
 
 
@@ -1526,7 +1543,8 @@ DYNAMIC = {"winter": lambda *a: (_dyn_snow(*a), _dyn_penguin(*a)),
            "glacier": lambda *a: _dyn_snow(*a, count=40), "christmas": lambda *a: (_dyn_snow(*a, count=60), _dyn_lights(*a)),
            "mountains": lambda *a: _dyn_snow(*a, count=30), "ocean": lambda *a: (_dyn_waves(*a), _dyn_dolphin(*a)),
            "summer": lambda *a: _dyn_waves(*a, top=190, color=(120, 200, 215)), "volcano": _dyn_embers, "autumn": _dyn_leaves,
-           "forest": lambda *a: (_dyn_fireflies(*a), _dyn_fox(*a)), "aurora": _dyn_aurora, "startrek": _dyn_warp,
+           "forest": lambda *a: (_dyn_fireflies(*a), _dyn_fox(*a)), "aurora": _dyn_aurora,
+           "startrek": lambda *a: (_dyn_warp(*a), _dyn_ship(*a)),
            "halloween": _dyn_bats, "vaporwave": _dyn_grid, "desert": _dyn_scorpion}
 ANIM_SCENES = set(DYNAMIC)
 
@@ -2024,7 +2042,7 @@ GPS_TOKENS = ("gps", "lat", "lon", "sats")
 STATUS_LINES = ("CPU {temp}  load {cpu}  RAM {mem}", "IP {ip}", "GPS {gps}  {lat} {lon}",
                 "Up {uptime}  Power {power}  Bat {battery}", "Pwned {handshakes}  Cracked {cracked}  Session {session}")
 TAB_NAMES = ("themes", "plugins", "system", "awards", "layout", "crack")
-TAB_WINDOW = 4      # tabs shown at once before it needs '<'/'>' to see the rest
+TAB_WINDOW = 5      # tabs shown at once before it needs '<'/'>' to see the rest: as many as fit comfortably
 TAB_ARROW_W = 36
 PROTECTED_PLUGINS = ('theme_manager',)   # never listed: switching it off would remove the menu itself
 
@@ -2530,7 +2548,7 @@ def _pwa_icon(size, theme):
 
 class ThemeManager(plugins.Plugin):
     __author__ = "theme_manager contributors"
-    __version__ = "2.11.0"
+    __version__ = "2.11.1"
     __license__ = "GPL3"
     __description__ = "Theme engine for the 3.5 inch display: colors, effects, animations, custom text, web GUI."
 
