@@ -102,12 +102,12 @@ moving layer. `strength` fades the scenery toward the plain background, `speed` 
 |---|---|---|
 | `mountains` | sun over three ridges with snow caps and pines | light snow |
 | `glacier` | icy peaks | snow |
-| `ocean` | a low sun over the sea | waves |
-| `forest` | moon over layers of pines | fireflies |
-| `desert` | big sun, dunes and cacti | |
+| `ocean` | a low sun over the sea | waves, a leaping dolphin |
+| `forest` | moon over layers of pines | fireflies, a trotting fox |
+| `desert` | big sun, dunes and cacti | a patrolling scorpion |
 | `aurora` | dark peaks under northern lights | swaying curtains |
 | `volcano` | a cone with lava rivers | embers, glowing crater |
-| `winter` | moon, snowy hills and pines | snowfall |
+| `winter` | moon, snowy hills and pines | snowfall, a waddling penguin |
 | `spring` | sun, clouds, meadow with flowers | |
 | `summer` | sun over the sea, beach and palms | waves |
 | `autumn` | hills with bare trees and orange leaves | falling leaves |
@@ -119,6 +119,10 @@ moving layer. `strength` fades the scenery toward the plain background, `speed` 
 | `vaporwave` | striped sun over a grid | the grid glides |
 | `bloodmoon` | a red moon and a dead tree | |
 | `pixel` | blocky hills and clouds in handheld greens | |
+
+A few scenes (`ocean`, `forest`, `desert`, `winter`) also have a small animal wandering through them, the way a
+Flipper Zero's dolphin turns up in its own UI — not every scene, just a handful, so it stays a nice surprise rather
+than clutter.
 
 Combine it with the other effects: stars over a night scene, `vignette` to darken the edges. The web editor has a
 "scene" checkbox with a kind dropdown under Effects.

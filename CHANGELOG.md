@@ -1,5 +1,12 @@
 # Changelog
 
+## 2.10.0
+
+**Sprites.** A handful of scenes now have a small animal wandering through them, the way a Flipper Zero's dolphin
+turns up in its own UI: a dolphin leaping in `ocean`, a fox trotting through `forest`, a scorpion patrolling
+`desert` (now animated), and a penguin waddling through `winter`. Not every scene, just these four, so it stays a
+surprise rather than clutter.
+
 ## 2.9.0
 
 **Removed the Radar.** The network-ranking tab and its API/editor tab are gone. It was harmless (display-only,

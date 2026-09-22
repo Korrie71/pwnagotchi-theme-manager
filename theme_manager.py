@@ -1429,10 +1429,88 @@ def _dyn_grid(img, d, w, h, t, sp):
         d.line([(0, y), (w, y)], fill=(110, 44, 170), width=1)
 
 
-DYNAMIC = {"winter": _dyn_snow, "glacier": lambda *a: _dyn_snow(*a, count=40), "christmas": lambda *a: (_dyn_snow(*a, count=60), _dyn_lights(*a)),
-           "mountains": lambda *a: _dyn_snow(*a, count=30), "ocean": _dyn_waves,
+# ---- sprites: a small animal in a handful of scenes (not all of them), the way a Flipper Zero's dolphin turns up
+def _dolphin_pts(cx, cy, s, facing):
+    pts = [(1.0, 0.05), (0.6, -0.22), (0.2, -0.32), (0.08, -0.55), (-0.05, -0.32), (-0.5, -0.15),
+           (-0.85, -0.32), (-0.7, -0.02), (-0.85, 0.16), (-0.5, 0.08), (-0.05, 0.22), (0.45, 0.2)]
+    return [(cx + facing * x * s, cy + y * s) for x, y in pts]
+
+
+def _dyn_dolphin(img, d, w, h, t, sp, surface=228, hop=150):
+    """Leaps out of the water and back in, on a loop; stays submerged (undrawn) between leaps."""
+    cyc = t * 34 * sp
+    x = (cyc % (w + hop)) - hop / 2
+    arc = math.sin(((cyc % hop) / hop) * math.pi * 1.4)
+    if arc <= 0.02:
+        return
+    y, s = surface - arc * 40, 15
+    d.polygon(_dolphin_pts(x, y, s, 1), fill=(48, 70, 90))
+    d.ellipse((x + 0.78 * s - 1.5, y - 0.08 * s - 1.5, x + 0.78 * s + 1.5, y - 0.08 * s + 1.5), fill=(15, 15, 20))
+
+
+def _dyn_fox(img, d, w, h, t, sp):
+    """Trots back and forth along the forest floor."""
+    near = _memo(("forest-ridge", w), (), lambda: _ridge(w, 262, 16, 19))
+    span, cyc = w + 80, (t * 26 * sp) % (2 * (w + 80))
+    x = (cyc if cyc < span else 2 * span - cyc) - 40
+    facing = 1 if cyc < span else -1
+    gy = _ry(near, x) + 8
+    bob = abs(math.sin(t * 8 * sp)) * 2
+    bx, by = x, gy - 9 - bob
+    col = (176, 82, 34)
+    d.ellipse((bx - 10, by - 5, bx + 10, by + 5), fill=col)                                            # body
+    hx, hy = bx + facing * 9, by - 3
+    d.ellipse((hx - 5, hy - 5, hx + 5, hy + 4), fill=col)                                               # head
+    d.polygon([(hx + facing * 4, hy + 1), (hx + facing * 12, hy + 2), (hx + facing * 4, hy + 4)], fill=col)  # snout
+    d.polygon([(hx - facing, hy - 5), (hx + facing * 3, hy - 11), (hx + facing * 5, hy - 4)], fill=col)      # ear
+    tx, ty = bx - facing * 10, by - 2
+    d.polygon([(tx, ty), (tx - facing * 11, ty - 8), (tx - facing * 7, ty + 3)], fill=col)               # tail
+    tip0, tip1 = sorted((tx - facing * 11 - 2, tx - facing * 8))
+    d.ellipse((tip0, ty - 10, tip1, ty - 6), fill=(240, 235, 225))                                       # tail tip
+    for lx in (-6, 3):
+        d.line([(bx + lx, by + 4), (bx + lx + (2 if bob > 1 else -2), gy)], fill=col, width=2)           # legs
+
+
+def _dyn_scorpion(img, d, w, h, t, sp):
+    """Patrols back and forth over a patch of sand."""
+    near = _memo(("desert-ridge", w), (), lambda: _ridge(w, 276, 22, 12))
+    x = 220 + math.sin(t * 0.6 * sp) * 90
+    facing = 1 if math.cos(t * 0.6 * sp) >= 0 else -1
+    gy = _ry(near, x) + 6
+    col = (92, 44, 26)
+    d.ellipse((x - 7, gy - 6, x + 7, gy + 1), fill=col)
+    head0, head1 = sorted((x + facing * 7, x + facing * 14))
+    d.ellipse((head0, gy - 5, head1, gy), fill=col)
+    tail = [(x - facing * 6, gy - 4), (x - facing * 13, gy - 11), (x - facing * 11, gy - 18), (x - facing * 17, gy - 20)]
+    d.line(tail, fill=col, width=2)
+    d.polygon([(x - facing * 17, gy - 20), (x - facing * 21, gy - 24), (x - facing * 15, gy - 24)], fill=col)
+    for lx in (-4, 0, 4):
+        d.line([(x + lx, gy - 1), (x + lx + facing * 2, gy + 4)], fill=col, width=1)
+    d.line([(x + facing * 12, gy - 4), (x + facing * 17, gy - 8)], fill=col, width=2)
+
+
+def _dyn_penguin(img, d, w, h, t, sp):
+    """Waddles back and forth over the snow."""
+    near = _memo(("winter-ridge", w), (), lambda: _ridge(w, 262, 22, 9))
+    span, cyc = w + 60, (t * 18 * sp) % (2 * (w + 60))
+    x = (cyc if cyc < span else 2 * span - cyc) - 30
+    gy = _ry(near, x) + 6
+    waddle = math.sin(t * 6 * sp) * 3
+    bx, beak = x + waddle, 1 if waddle >= 0 else -1
+    d.ellipse((bx - 7, gy - 20, bx + 7, gy), fill=(20, 22, 28))
+    d.ellipse((bx - 4, gy - 15, bx + 4, gy - 2), fill=(240, 244, 248))
+    d.ellipse((bx - 5, gy - 25, bx + 5, gy - 16), fill=(20, 22, 28))
+    d.polygon([(bx + beak * 5, gy - 21), (bx + beak * 9, gy - 20), (bx + beak * 5, gy - 19)], fill=(230, 150, 40))
+    for lx in (-3, 3):
+        d.line([(bx + lx, gy - 1), (bx + lx, gy + 2)], fill=(230, 150, 40), width=2)
+
+
+DYNAMIC = {"winter": lambda *a: (_dyn_snow(*a), _dyn_penguin(*a)),
+           "glacier": lambda *a: _dyn_snow(*a, count=40), "christmas": lambda *a: (_dyn_snow(*a, count=60), _dyn_lights(*a)),
+           "mountains": lambda *a: _dyn_snow(*a, count=30), "ocean": lambda *a: (_dyn_waves(*a), _dyn_dolphin(*a)),
            "summer": lambda *a: _dyn_waves(*a, top=190, color=(120, 200, 215)), "volcano": _dyn_embers, "autumn": _dyn_leaves,
-           "forest": _dyn_fireflies, "aurora": _dyn_aurora, "startrek": _dyn_warp, "halloween": _dyn_bats, "vaporwave": _dyn_grid}
+           "forest": lambda *a: (_dyn_fireflies(*a), _dyn_fox(*a)), "aurora": _dyn_aurora, "startrek": _dyn_warp,
+           "halloween": _dyn_bats, "vaporwave": _dyn_grid, "desert": _dyn_scorpion}
 ANIM_SCENES = set(DYNAMIC)
 
 
@@ -2392,7 +2470,7 @@ def draw_notice(img, text, theme):
 
 class ThemeManager(plugins.Plugin):
     __author__ = "theme_manager contributors"
-    __version__ = "2.9.0"
+    __version__ = "2.10.0"
     __license__ = "GPL3"
     __description__ = "Theme engine for the 3.5 inch display: colors, effects, animations, custom text, web GUI."
 
