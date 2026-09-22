@@ -42,8 +42,8 @@ moods = [("happy", faces.HAPPY), ("excited", faces.EXCITED), ("sad", faces.SAD),
 grid([(render("moody", face, mood=m), "mood: " + m) for m, face in moods], 3, (360, 240)).save(os.path.join(OUT, "moods.png"), optimize=True)
 
 # ---- more themes
-more = ["startrek", "spring", "summer", "autumn", "winter", "mountain", "ocean", "forest", "desert", "aurora", "volcano", "halloween",
-        "christmas", "space"]
+more = ["startrek", "lcars", "spring", "summer", "autumn", "winter", "mountain", "ocean", "forest", "desert", "aurora", "volcano",
+        "halloween", "christmas", "space"]
 grid([(render(n), n) for n in more], 4, (360, 240)).save(os.path.join(OUT, "themes-more.png"), optimize=True)
 
 # ---- face packs

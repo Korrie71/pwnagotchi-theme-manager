@@ -26,7 +26,7 @@ with pwnagotchi's mood. Themes are small JSON files you can edit in a web editor
 
 ## Features
 
-- **27 built-in themes, 19 with scenery** painted behind the text (the `scene` effect): mountains, ocean, forest, desert, volcano, aurora, the four seasons, a Star Trek console, a neon city and more; a few even have a small animal wandering through (a dolphin, a fox, a scorpion, a penguin)
+- **28 built-in themes, 20 with scenery** painted behind the text (the `scene` effect): mountains, ocean, forest, desert, volcano, aurora, the four seasons, a Star Trek console, an LCARS instrument panel, a neon city and more; a few even have a small animal wandering through (a dolphin, a whale, a fox, a scorpion, a penguin, an owl)
 - **Colors and gradients** for ink, background and the top/bottom bars
 - **Effects:** glow, scanlines, vignette, film grain, pulse, rainbow, glitch, matrix rain, twinkling stars, border
 - **Per-element colors:** face, name, status, stats and any plugin's on-screen items each get their own color

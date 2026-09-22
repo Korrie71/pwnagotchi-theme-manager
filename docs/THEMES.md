@@ -20,8 +20,9 @@ The file name (without `.json`) is the theme name: letters, digits, `_`, `-` and
 Saved files are picked up live. If you edit the active theme's file, re-apply it (or save it from the web page).
 Built-in theme names can't be saved over or deleted, but you can copy them under a new name. They are `default`, `paper`,
 `matrix`, `amber`, `cyberpunk`, `vaporwave`, `blood`, `ice`, `gameboy`, `rainbow`, and the newer ones: `startrek`
-(a bridge console with a stardate), the seasons `spring`, `summer`, `autumn` and `winter`, the landscapes `mountain`,
-`ocean`, `forest`, `desert`, `aurora` and `volcano`, and `halloween`, `christmas` and `space`.
+(a bridge console with a stardate), `lcars` (a ship's-computer instrument panel, no viewscreen), the seasons `spring`,
+`summer`, `autumn` and `winter`, the landscapes `mountain`, `ocean`, `forest`, `desert`, `aurora` and `volcano`, and
+`halloween`, `christmas` and `space`.
 
 ## How it works (read this once)
 
@@ -115,14 +116,15 @@ moving layer. `strength` fades the scenery toward the plain background, `speed` 
 | `christmas` | pines with stars and snow | blinking lights, snow |
 | `space` | nebulae and a ringed planet | |
 | `startrek` | console bars along the edges and a planet | warp streaks, an occasional ship flying past |
+| `lcars` | a ship's-computer instrument panel: stacked rounded blocks, no viewscreen | |
 | `city` | a neon skyline | |
 | `vaporwave` | striped sun over a grid | the grid glides |
 | `bloodmoon` | a red moon and a dead tree | |
 | `pixel` | blocky hills and clouds in handheld greens | |
 
-A few scenes (`ocean`, `forest`, `desert`, `winter`, `startrek`) also have a small animal or ship passing through, the way a
-Flipper Zero's dolphin turns up in its own UI — not every scene, just a handful, so it stays a nice surprise rather
-than clutter.
+A few scenes (`ocean`, `forest`, `desert`, `winter`, `startrek`, `aurora`) also have a small animal or ship passing
+through, the way a Flipper Zero's dolphin turns up in its own UI — not every scene, just a handful, so it stays a
+nice surprise rather than clutter. `ocean` also gets an occasional whale, much rarer than its dolphin.
 
 Combine it with the other effects: stars over a night scene, `vignette` to darken the edges. The web editor has a
 "scene" checkbox with a kind dropdown under Effects.

@@ -1,5 +1,15 @@
 # Changelog
 
+## 2.13.0
+
+**Two more sprites.** A whale surfaces to blow a spout in `ocean`, off to one side and much more rarely than the
+dolphin — a rare surprise, not a second fixture. An owl glides across `aurora`'s night sky every so often, the same
+"occasional flyby" idea as the startrek ship.
+
+**A new theme: `lcars`.** A ship's-computer instrument panel — stacked rounded LCARS blocks in orange, gold and
+violet on black — as a genuinely different companion to `startrek`'s viewscreen-and-console look rather than a
+reskin of it. No stars, no planet: this is the inside of the ship.
+
 ## 2.12.0
 
 **Radar is back, redesigned.** Instead of the old ranked list, it is now a sonar-style sweep: a rotating line with a

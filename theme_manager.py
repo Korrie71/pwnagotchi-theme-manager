@@ -82,7 +82,7 @@ KEY_RE = re.compile(r"^[A-Za-z0-9_.\-]{1,40}$")
 EFFECTS = {"scanlines", "vignette", "glow", "noise", "pulse", "rainbow",
            "glitch", "rain", "stars", "border", "scene"}
 SCENE_KINDS = ("mountains", "glacier", "ocean", "forest", "desert", "aurora", "volcano", "winter", "spring", "summer", "autumn",
-               "halloween", "christmas", "space", "startrek", "city", "vaporwave", "bloodmoon", "pixel")
+               "halloween", "christmas", "space", "startrek", "city", "vaporwave", "bloodmoon", "pixel", "lcars")
 ANIMATED = {"pulse", "rainbow", "glitch", "rain", "stars", "noise"}
 LIVE_TOKENS = ("{time}", "{cpu}", "{temp}", "{mem}", "{uptime}", "{ip}", "{gps}", "{lat}", "{lon}", "{sats}",
                "{handshakes}", "{cracked}", "{session}", "{battery}", "{power}", "{mode}", "{queued}", "{uploaded}", "{invalid}")
@@ -192,6 +192,17 @@ BUILTIN = {
                                      "effects": [{"type": "glitch", "interval": 1.5}]},
                           "sad": {"fg": "#ffcc00", "accent": "#ffcc00", "elements": {"face": "#ffcc00"}},
                           "handshake": {"elements": {"face": "#66ff99", "name": "#66ff99"}, "effects": [{"type": "glow", "radius": 5, "strength": 1}]}}},
+    "lcars": {"bg": "#000000", "fg": "#99ccff", "accent": "#ffcc66", "web": "#ff9966", "fps": 3,
+              "description": "a ship's-computer instrument panel: stacked rounded LCARS blocks in orange, gold and violet, no viewscreen",
+              "elements": {"face": "#99ccff", "name": "#ff9966", "status": "#ccccff", "channel": "#ffcc66", "aps": "#ffcc66",
+                           "uptime": "#cc99ff", "shakes": "#ff9966", "mode": "#9999cc"},
+              "effects": [{"type": "scene", "kind": "lcars"}, {"type": "border", "size": 2, "color": "#ff9966"}],
+              "text": [{"text": "LCARS :: SECTION 47-ALPHA :: STANDBY", "x": 10, "y": 262, "size": 11, "bold": True, "color": "#ffcc66"}],
+              "mood": {"angry": {"fg": "#ff6666", "accent": "#ff6666", "elements": {"face": "#ff6666"},
+                                 "effects": [{"type": "pulse", "speed": 6, "strength": 0.4}]},
+                       "broken": {"fg": "#ff6666", "elements": {"face": "#ff6666"}, "effects": [{"type": "glitch", "interval": 1.8}]},
+                       "sad": {"fg": "#9999cc", "elements": {"face": "#9999cc"}},
+                       "handshake": {"elements": {"face": "#99ffcc", "name": "#99ffcc"}, "effects": [{"type": "glow", "radius": 4, "strength": 0.8}]}}},
     "spring": {"bg": "#0f2a1c", "fg": "#e6ffd0", "accent": "#ff9ecb", "web": "#ff9ecb", "fps": 4,
                "description": "fresh green with drifting blossoms",
                "gradient": {"from": "#0f2a1c", "to": "#2f6b4a", "direction": "vertical"},
@@ -1282,6 +1293,24 @@ def _scene_startrek(c):
     c.d.arc((232 * SS, 210 * SS, 368 * SS, 250 * SS), 190, 350, fill=(204, 153, 204), width=2 * SS)
 
 
+def _scene_lcars(c):
+    """A ship's-computer instrument panel: stacked rounded LCARS blocks, no stars or planet -- this is the inside
+    of the ship, not the view out of it (that's what the `startrek` theme already does)."""
+    w, h = c.w, c.h
+    orange, gold, violet, blue, rust = (255, 153, 102), (255, 204, 102), (204, 153, 255), (153, 153, 204), (204, 102, 102)
+
+    def pill(x0, y0, x1, y1, r, color):
+        c.d.rounded_rectangle((x0 * SS, y0 * SS, x1 * SS, y1 * SS), radius=r * SS, fill=color)
+
+    pill(w - 34, 16, w, 96, 17, gold)                 # elbow cap, top right
+    for i, (y0, y1, col) in enumerate(((100, 130, orange), (134, 176, violet), (180, 198, blue),
+                                        (202, 244, rust), (248, 268, orange), (272, 300, violet))):
+        pill(w - 30, y0, w, y1, 10, col)
+    pill(0, h - 22, 120, h - 2, 10, orange)
+    pill(128, h - 22, 210, h - 2, 10, blue)
+    pill(218, h - 22, 260, h - 2, 10, gold)
+
+
 def _scene_city(c):
     w, h = c.w, c.h
     rng = random.Random(9)
@@ -1347,7 +1376,7 @@ SCENES = {"mountains": _scene_mountains, "glacier": _scene_glacier, "ocean": _sc
           "desert": _scene_desert, "aurora": _scene_aurora, "volcano": _scene_volcano, "winter": _scene_winter,
           "spring": _scene_spring, "summer": _scene_summer, "autumn": _scene_autumn, "halloween": _scene_halloween,
           "christmas": _scene_christmas, "space": _scene_space, "startrek": _scene_startrek, "city": _scene_city,
-          "vaporwave": _scene_vaporwave, "bloodmoon": _scene_bloodmoon, "pixel": _scene_pixel}
+          "vaporwave": _scene_vaporwave, "bloodmoon": _scene_bloodmoon, "pixel": _scene_pixel, "lcars": _scene_lcars}
 
 
 # ---- the moving layers (drawn at normal size onto the cached scene, every animation frame)
@@ -1478,6 +1507,25 @@ def _dyn_bats(img, d, w, h, t, sp):
         d.line([(x - 9, y - flap), (x - 4, y - 2), (x, y), (x + 4, y - 2), (x + 9, y - flap)], fill=(12, 2, 20), width=2)
 
 
+def _dyn_owl(img, d, w, h, t, sp):
+    """An owl glides across the night sky, every so often -- not a constant fixture."""
+    period = max(1.0, 26.0 / sp)
+    phase = (t % period) / period
+    if phase > 0.3:
+        return
+    travel = phase / 0.3
+    x = -30 + travel * (w + 60)
+    y = 165 + 14 * math.sin(travel * math.pi)
+    flap = math.sin(t * 10 * sp) * 6
+    col = (18, 20, 27)
+    d.polygon([(x, y - 1), (x - 16, y - 2 - flap), (x - 5, y + 2)], fill=col)   # left wing
+    d.polygon([(x, y - 1), (x + 16, y - 2 - flap), (x + 5, y + 2)], fill=col)   # right wing
+    d.ellipse((x - 4, y - 3, x + 4, y + 5), fill=col)                          # body
+    d.ellipse((x - 3.5, y - 7, x + 3.5, y - 1), fill=col)                      # head
+    d.ellipse((x - 2.3, y - 5.5, x - 0.6, y - 3.8), fill=(255, 205, 70))       # eyes
+    d.ellipse((x + 0.6, y - 5.5, x + 2.3, y - 3.8), fill=(255, 205, 70))
+
+
 def _dyn_grid(img, d, w, h, t, sp):
     hor = 206
     for i in range(8):     # the floor lines glide toward you
@@ -1503,6 +1551,26 @@ def _dyn_dolphin(img, d, w, h, t, sp, surface=228, hop=150):
     y, s = surface - arc * 40, 15
     d.polygon(_dolphin_pts(x, y, s, 1), fill=(48, 70, 90))
     d.ellipse((x + 0.78 * s - 1.5, y - 0.08 * s - 1.5, x + 0.78 * s + 1.5, y - 0.08 * s + 1.5), fill=(15, 15, 20))
+
+
+def _dyn_whale(img, d, w, h, t, sp, surface=230):
+    """Surfaces to blow a spout, much more rarely than the dolphin leaps, and well off to one side so they never collide."""
+    period = max(1.0, 50.0 / sp)
+    phase = (t % period) / period
+    if phase > 0.16:
+        return
+    rise = math.sin((phase / 0.16) * math.pi)
+    if rise <= 0.03:
+        return
+    x, s, y = w * 0.74, 22, surface - rise * 6
+    col = (36, 50, 64)
+    d.ellipse((x - s, y - s * 0.32, x + s * 0.55, y + s * 0.32), fill=col)          # long dark back
+    d.ellipse((x - s * 0.35, y - s * 0.5, x + s * 0.2, y - s * 0.08), fill=col)     # head bump
+    d.polygon([(x - s, y), (x - s * 1.25, y - 4), (x - s * 0.95, y + 5)], fill=col)  # tail hint
+    if rise > 0.55:                                                                 # a spout near the peak
+        k = (rise - 0.55) / 0.45
+        for i in range(3):
+            _blend_px(img, d, x - s * 0.15 + i * 2 - 2, y - s * 0.5 - k * (10 + i * 6), (220, 230, 240), (1 - k) * 0.8, 2 + i)
 
 
 def _dyn_fox(img, d, w, h, t, sp):
@@ -1564,9 +1632,9 @@ def _dyn_penguin(img, d, w, h, t, sp):
 
 DYNAMIC = {"winter": lambda *a: (_dyn_snow(*a), _dyn_penguin(*a)),
            "glacier": lambda *a: _dyn_snow(*a, count=40), "christmas": lambda *a: (_dyn_snow(*a, count=60), _dyn_lights(*a)),
-           "mountains": lambda *a: _dyn_snow(*a, count=30), "ocean": lambda *a: (_dyn_waves(*a), _dyn_dolphin(*a)),
+           "mountains": lambda *a: _dyn_snow(*a, count=30), "ocean": lambda *a: (_dyn_waves(*a), _dyn_dolphin(*a), _dyn_whale(*a)),
            "summer": lambda *a: _dyn_waves(*a, top=190, color=(120, 200, 215)), "volcano": _dyn_embers, "autumn": _dyn_leaves,
-           "forest": lambda *a: (_dyn_fireflies(*a), _dyn_fox(*a)), "aurora": _dyn_aurora,
+           "forest": lambda *a: (_dyn_fireflies(*a), _dyn_fox(*a)), "aurora": lambda *a: (_dyn_aurora(*a), _dyn_owl(*a)),
            "startrek": lambda *a: (_dyn_warp(*a), _dyn_ship(*a)),
            "halloween": _dyn_bats, "vaporwave": _dyn_grid, "desert": _dyn_scorpion}
 ANIM_SCENES = set(DYNAMIC)
@@ -2623,7 +2691,7 @@ def _pwa_icon(size, theme):
 
 class ThemeManager(plugins.Plugin):
     __author__ = "theme_manager contributors"
-    __version__ = "2.12.0"
+    __version__ = "2.13.0"
     __license__ = "GPL3"
     __description__ = "Theme engine for the 3.5 inch display: colors, effects, animations, custom text, web GUI."
 
