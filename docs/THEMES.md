@@ -255,6 +255,9 @@ A file named `default.png` is used for moods you didn't draw. If neither exists,
 `http://<pi-ip>:8080/plugins/theme_manager/`. The picture at the top is a live preview of your current screen with the
 theme you are editing. Animated themes animate. Changes are only sent to the screen with **Apply to screen**.
 
+The page has a manifest and icon, so on a phone you can add it to your home screen (share/menu -> "Add to Home
+Screen") and open it like an app, with its own icon instead of a browser tab.
+
 | tab | what it does |
 |---|---|
 | Colors | four color pickers, gradient on/off with from/to pickers and direction, animation fps |
@@ -329,6 +332,12 @@ wpa-sec: a full handshake, a PMKID (crackable without a client ever connecting),
 an unusual network can occasionally fool it. Tapping a row that hasn't been cracked yet mentions it; the web editor
 shows it next to each row, and counts junk captures in its own stat card. `cracking list` prints it as a second column.
 
+If pwnagotchi's own `gps` plugin is enabled, it already saves a `<handshake>.gps.json` file next to each capture that
+had a fix. The dashboard reads that (nothing new to turn on): tap a located handshake to see its coordinates, the web
+editor shows a **map** link straight to OpenStreetMap for it, and the summary counts how many are located. This
+project doesn't draw its own map (`webgpsmap` already does that well); it just ties a location to a specific
+capture's crack status.
+
 **Swipe:** on the bare screen (no menu open), swipe sideways to change theme: left goes to the next theme, right to the
 previous one, and the new theme's name shows for a moment. It needs the calibration, and only clearly sideways swipes
 count, so taps, vertical swipes and slow drags are ignored.
@@ -362,6 +371,23 @@ one unlocks. The **Awards** tab of the touch menu and of the web editor show the
 
 Progress is kept in `/etc/pwnagotchi/themes/achievements.json`. The first time, it starts from the handshakes already on the device (those unlock without a message). Switch it all off in the web editor
 (Settings tab) or with `theme_manager.py achievements off`: nothing is counted or written then.
+
+## Attack modes
+
+A button on the System tab (next to `Hot-off`), and a selector at the top of the web editor's Settings tab, switch
+between three modes:
+
+- **Aggressive** is normal pwnagotchi behavior: nothing is changed.
+- **Passive recon** turns deauthentication and association off immediately, no restart needed (it edits
+  pwnagotchi's own running configuration; switching back to Aggressive puts it back exactly as it was, even if you
+  had deauth or association off already for some other reason).
+- **Home defense** does the same as Passive, and also watches for a new device broadcasting one of the network
+  names in your `whitelist` (`main.whitelist` in `config.toml`) that it has not seen before, a common sign of a
+  rogue or evil-twin access point. The first device seen for a whitelisted name is learned quietly; a second,
+  different one triggers a warning on the screen and in the log. It needs at least one entry in your whitelist to
+  have anything to watch. This is read-only otherwise: it never sends anything.
+
+`theme_manager.py mode` prints the current mode, `mode passive` (or `aggressive`, `home`) sets it.
 
 ## Brightness and night mode
 

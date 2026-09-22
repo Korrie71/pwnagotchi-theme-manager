@@ -12,8 +12,8 @@ import pwnagotchi  # noqa: E402  (after _util, which puts the stand-in package o
 sandbox()
 
 # ---------------------------------------------------------------- validation
-ok("defaults: auto-off is OFF, 85 C for 60 s, achievements on", T.clean_settings({}) == {
-    "overheat_off": False, "overheat_temp": 85.0, "overheat_seconds": 60.0, "achievements": True})
+ok("defaults: auto-off is OFF, 85 C for 60 s, achievements on, mode aggressive", T.clean_settings({}) == {
+    "overheat_off": False, "overheat_temp": 85.0, "overheat_seconds": 60.0, "achievements": True, "mode": "aggressive"})
 ok("values are clamped to safe ranges", T.clean_settings({"overheat_temp": 10})["overheat_temp"] == 70
    and T.clean_settings({"overheat_temp": 999})["overheat_temp"] == 95 and T.clean_settings({"overheat_seconds": 1})["overheat_seconds"] == 10)
 try:
@@ -22,7 +22,7 @@ try:
 except ValueError:
     rejected = True
 ok("settings must be an object", rejected)
-ok("unknown keys are dropped", set(T.clean_settings({"bogus": 1, "overheat_off": True})) == {"overheat_off", "overheat_temp", "overheat_seconds", "achievements"})
+ok("unknown keys are dropped", set(T.clean_settings({"bogus": 1, "overheat_off": True})) == {"overheat_off", "overheat_temp", "overheat_seconds", "achievements", "mode"})
 
 # ---------------------------------------------------------------- the overheating logic
 shutdowns = []

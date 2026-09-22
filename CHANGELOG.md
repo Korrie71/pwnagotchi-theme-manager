@@ -1,5 +1,24 @@
 # Changelog
 
+## 2.11.0
+
+**Location memory.** The Cracking dashboard now shows where a handshake was captured, if pwnagotchi's own `gps`
+plugin saved a location for it (a `.gps.json` file it already writes next to the capture; nothing new to turn on).
+Tap a located handshake to see its coordinates, or open it on OpenStreetMap from the web editor. A new "Located"
+count in the summary. This does not draw its own map (`webgpsmap` already does); it just ties a location to a
+specific capture's status.
+
+**Attack modes.** Aggressive (normal), Passive recon (deauth and association off immediately, no restart), and Home
+defense (passive, plus a warning if a new device starts broadcasting one of your whitelisted network names, a sign
+of a rogue access point). A button on the System tab, a selector in the web editor's Settings tab, and
+`theme_manager.py mode`.
+
+**Installable web editor.** A manifest and icon, so a phone can add it to the home screen and open it like an app.
+
+**Fixed:** the on-screen toast for a status message used to get cut off at a fixed 30 characters, sometimes mid-word
+(present since the handshake-quality feature); it now shortens gracefully with an ellipsis, fitted to the screen. A
+local `import io` inside the web API's face-image handler shadowed the module-level one, which would have broken it.
+
 ## 2.10.0
 
 **Sprites.** A handful of scenes now have a small animal wandering through them, the way a Flipper Zero's dolphin

@@ -83,7 +83,7 @@ crack_info = {"__summary__": {"kind": "summary", "text": T._crack_summary_text(T
 crack_info.update({r["file"]: dict(r, kind="row") for r in crack_rows})
 menu.update(crack=["__summary__"] + [r["file"] for r in crack_rows], crack_info=crack_info)
 for name, extra in (("menu-themes.png", {"tab": "themes", "page": 1}), ("menu-plugins.png", {"tab": "plugins", "busy": {"bt-tether"}}),
-                    ("menu-system.png", {"tab": "system", "overheat": True}), ("menu-awards.png", {"tab": "awards"}),
+                    ("menu-system.png", {"tab": "system", "overheat": True, "atkmode": "home"}), ("menu-awards.png", {"tab": "awards"}),
                     ("menu-layout.png", {"tab": "layout", "page": 1}), ("menu-crack.png", {"tab": "crack"}),
                     ("menu-adjust.png", {"mode": "adjust", "adjust": "face", "offset": (12, 6), "box": (25, 52, 252, 122), "step_px": 5})):
     shown = dict(menu, **extra)

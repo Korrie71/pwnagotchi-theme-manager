@@ -65,4 +65,28 @@ code, j = call("api/settings", {"settings": {"achievements": False}})
 code, j = call("api/achievements")
 ok("achievements: switched off shows as off", j["enabled"] is False)
 
+# ---------------------------------------------------------------- the PWA bits (installable on a phone home screen)
+def raw(path):
+    with app.test_request_context("/" + path, method="GET"):
+        r = tm.on_webhook(path, flask.request)
+        r, code = r if isinstance(r, tuple) else (r, 200)
+        return code, r.get_data(), r.mimetype
+
+
+code, data, mime = raw("manifest.json")
+manifest = json.loads(data)
+ok("the manifest is valid JSON with a name and icons", code == 200 and manifest["name"] and len(manifest["icons"]) == 2)
+ok("...served as a manifest, not plain json", mime == "application/manifest+json")
+ok("both declared icon sizes are actually servable", all(raw(i["src"])[0] == 200 for i in manifest["icons"]))
+code, data, mime = raw("icon-192.png")
+ok("the icon is a real PNG", code == 200 and data[:8] == b"\x89PNG\r\n\x1a\n" and mime == "image/png")
+from PIL import Image
+import io as _io
+img = Image.open(_io.BytesIO(data))
+ok("...at the size the manifest promised", img.size == (192, 192))
+code, data, mime = raw("icon-512.png")
+ok("the larger icon is too", code == 200 and Image.open(_io.BytesIO(data)).size == (512, 512))
+code, data, mime = raw("sw.js")
+ok("there is a service worker (needed for a phone to treat this as installable)", code == 200 and "fetch" in data.decode() and "javascript" in mime)
+
 finish()

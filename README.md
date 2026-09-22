@@ -33,12 +33,13 @@ with pwnagotchi's mood. Themes are small JSON files you can edit in a web editor
 - **Custom text lines** with live placeholders (`{time}`, `{cpu}`, `{temp}`, `{ip}`, `{gps}`, `{handshakes}`, `{cracked}`, `{power}`...) and scrolling marquees
 - **Mood-reactive themes:** colors and effects follow pwnagotchi's face (sad, angry, happy...), with smooth blending and a flash on new handshakes
 - **Face packs:** replace the text face with PNG or GIF images per mood, in color or tinted by the theme
-- **Web editor** with live preview: sliders, gradient picker, drag-to-place text, click a part of the preview to recolor it, import/export
+- **Web editor** with live preview: sliders, gradient picker, drag-to-place text, click a part of the preview to recolor it, import/export; installable on a phone home screen
 - **Touch menu:** double tap the screen to switch themes (or just swipe sideways), enable/disable pwnagotchi plugins on the fly, or see system status and restart/reboot/shut down
-- **Cracking dashboard:** every captured handshake with its upload/crack status and a local handshake-quality guess (full/PMKID/partial/junk), on the screen and in the editor
+- **Cracking dashboard:** every captured handshake with its upload/crack status, a local handshake-quality guess (full/PMKID/partial/junk), and its location if pwnagotchi’s gps plugin has one, on the screen and in the editor
 - **Move anything on the screen:** tap an element in the touch menu and nudge it with small `+` and `-` buttons (or do it in the web editor)
 - **Achievements:** unlock them for handshakes, uptime, themes tried and more, on the screen and in the editor
 - **Overheating auto-off (optional):** a countdown on the screen, then the Pi shuts itself down; a touch cancels it
+- **Attack modes:** Aggressive (normal), Passive recon (deauth/associate off), or Home defense (passive, plus a warning if a new device starts broadcasting one of your own network names)
 - **Night mode:** dim the screen by hand, on a schedule, or after a few minutes without a touch
 - **Warnings:** a banner on the screen for low power and high temperature
 - **Safe experiments:** try a theme for 30 seconds, then it goes back by itself; back up, restore, share and import themes and face packs from the editor
@@ -141,6 +142,7 @@ $P overheat on 85 60     # turn the Pi off after 60 s at 85 C (or: overheat off)
 $P achievements off      # stop keeping track of achievements (or: on)
 $P layout show           # what was moved on the screen (or: layout reset)
 $P cracking              # handshake upload/crack counts as JSON (or: cracking list)
+$P mode                  # show the attack mode (or: mode passive / mode home)
 ```
 
 **Touch menu:** double tap the screen (two quick taps in about the same place). The first time you are asked to tap four
@@ -150,10 +152,10 @@ $P cracking              # handshake upload/crack counts as JSON (or: cracking l
 |---|---|
 | **Themes** | switch theme with one tap |
 | **Plugins** | every installed plugin with an `ON`/`OFF` switch that takes effect immediately and is saved to `config.toml`; a plugin that fails to load shows `ERR` and is set back to disabled |
-| **System** | temperature, load, RAM, IP, GPS status, uptime, power state, handshake counts; `restart`, `reboot`, `shutdown` and AUTO/MANU mode buttons that each need a second tap to confirm; `Hot-off` switches the overheating auto-off on and off; `refresh` redraws the whole screen to clear a glitchy panel; `dim` cycles the brightness |
+| **System** | temperature, load, RAM, IP, GPS status, uptime, power state, handshake counts; `restart`, `reboot`, `shutdown` and AUTO/MANU mode buttons that each need a second tap to confirm; `Hot-off` switches the overheating auto-off on and off; an attack-mode button cycles Aggressive/Passive/Home defense; `refresh` redraws the whole screen to clear a glitchy panel; `dim` cycles the brightness |
 | **Awards** | the achievements with your progress; tap one to see what it asks for |
 | **Layout** | every element on the screen; tap one to move it with `X -` `X +` `Y -` `Y +` (1, 5 or 10 pixels per tap), `reset` and `done`; `clear` puts everything back |
-| **Crack** | every captured handshake with a status pill (`PWND`/`WAIT`/`NEW`/`BAD`/`?`); tap one for the password or what it's waiting on |
+| **Crack** | every captured handshake with a status pill (`PWND`/`WAIT`/`NEW`/`BAD`/`?`); tap one for the password, quality guess, or location if it has one |
 
 Swipe sideways on the bare screen to change theme. `close`, a tap outside the menu, or 20 seconds of nothing closes it. It costs nothing while idle: one thread sleeps until
 the screen is touched.
@@ -209,7 +211,7 @@ python tests/run_all.py            # or run any tests/test_*.py on its own
 ```
 
 They cover theme validation and rendering (including a fuzz test), per-element colors, moods, face packs, the touch
-menu and calibration, plugin switching, the System tab, achievements, the layout mover, the cracking dashboard, the web API, the placeholders, the install script, and a scan that keeps
+menu and calibration, plugin switching, the System tab, achievements, the layout mover, the cracking dashboard, attack modes, the web API, the placeholders, the install script, and a scan that keeps
 personal data out of the repository. The tools in [`tools/`](tools) regenerate the screenshots and the demo GIF from
 made-up data. GitHub Actions runs the tests on every push.
 

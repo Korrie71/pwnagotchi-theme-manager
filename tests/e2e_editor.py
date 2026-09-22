@@ -237,7 +237,7 @@ with sync_playwright() as p:
     cracking0 = requests.get(URL + "api/cracking").json()
     tab("Cracking")
     page.wait_for_selector(".statcard")
-    check("the Cracking tab shows the summary cards", page.locator(".statcard").count() == 6)
+    check("the Cracking tab shows the summary cards", page.locator(".statcard").count() == 7)
     check("...and matches the API's counts", page.locator(".statcard div").first.inner_text() == str(cracking0["summary"]["cracked"]))
 
     settings0 = requests.get(URL + "api/settings").json()
@@ -265,6 +265,10 @@ with sync_playwright() as p:
     phone.goto(URL)
     phone.wait_for_selector(".card")
     check("on a phone-sized screen the page does not scroll sideways", not phone.evaluate("document.documentElement.scrollWidth>document.documentElement.clientWidth"))
+    check("the page links to a web app manifest with an icon", phone.evaluate(
+        "()=>fetch(document.querySelector('link[rel=manifest]').href).then(r=>r.json()).then(m=>m.icons.length>0)"))
+    phone.wait_for_function("navigator.serviceWorker.getRegistrations().then(r=>r.length>0)", timeout=5000)
+    check("the service worker registers (installable as an app)", True)
     browser.close()
 
 cleanup()

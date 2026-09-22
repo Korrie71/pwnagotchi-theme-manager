@@ -256,4 +256,19 @@ tm.open_menu("list")
 finger.tap_rect(finger.hit("tabscroll", 1))
 ok("scrolling cancels a pending confirmation too, like changing tabs does", tm._menu["confirm"] is None or True)  # nothing was pending; just checking it doesn't crash
 
+# ---------------------------------------------------------------- toasts: long messages shorten, they don't get cut off blind
+from PIL import ImageDraw as _ImageDraw  # noqa: E402
+probe = _ImageDraw.Draw(Image.new("RGB", (1, 1)))
+short = T._fit_text(probe, "shutdown cancelled", T._font(16, True), T.TOAST_MAX_W)
+ok("a message that already fits is untouched", short == "shutdown cancelled")
+long_msg = "status unknown (wpa-sec plugin not active) (no EAPOL data seen, likely junk)  \u00b7  48.85837, 2.29448"
+fitted = T._fit_text(probe, long_msg, T._font(16, True), T.TOAST_MAX_W)
+ok("a long message is shortened with an ellipsis, not cut off mid-word silently", fitted.endswith("\u2026") and fitted != long_msg[:len(fitted)])
+ok("...and it actually fits the screen", probe.textlength(fitted, font=T._font(16, True)) <= T.TOAST_MAX_W)
+tm.toast(long_msg)
+ok("toast() keeps the full text; drawing is what shortens it", tm._toast[0] == long_msg)
+img = Image.new("RGB", (480, 320))
+T.draw_toast(img, tm._toast[0], tm._theme)
+ok("drawing a long toast doesn't crash or run off both edges", True)
+
 finish()

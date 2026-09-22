@@ -12,6 +12,7 @@ CLI (run with /opt/.pwn/bin/python3):
   theme_manager.py idle 5 25              dim to 25% after 5 minutes without a touch (or: idle off)
   theme_manager.py overheat on 85 60      turn the Pi off after 60 s at 85 C (or: overheat off)
   theme_manager.py achievements on|off    keep track of achievements or not
+  theme_manager.py mode [aggressive|passive|home]   show or set the attack mode
   theme_manager.py layout show|reset      what was moved on the screen, or put everything back
   theme_manager.py cracking [list]        handshake upload/crack counts, or the full list
   theme_manager.py validate FILE.json
@@ -96,7 +97,7 @@ MOOD_FADE = 0.6    # seconds to blend between moods
 HANDSHAKE_FLASH = 4.0
 FORCE_FILE = os.path.join(THEME_DIR, "force_mood.json")
 FACES_DIR = os.path.join(THEME_DIR, "faces")
-STATE_FILES = ("active.json", "force_mood.json", "touch.json", "display.json", "settings.json", "achievements.json", "layout.json", "disclaimer.json")   # JSON files in THEME_DIR that are not themes
+STATE_FILES = ("active.json", "force_mood.json", "touch.json", "display.json", "settings.json", "achievements.json", "layout.json", "disclaimer.json", "home_watch.json")   # JSON files in THEME_DIR that are not themes
 PACK_RE = re.compile(r"^[A-Za-z0-9_\-]{1,32}$")
 
 # Built-in themes. bg/fg/accent/web are required, everything else is optional.
@@ -641,6 +642,19 @@ def _wpa_potfile():
     return out
 
 
+def _gps_sidecar(path):
+    """The location a handshake was captured at, if pwnagotchi's own gps plugin saved one next to it (a
+    <handshake>.gps.json file with the bettercap gps session at the time). None if there isn't one, it can't be
+    read, or it's a 0,0 placeholder (no fix yet when it was written)."""
+    try:
+        with open(os.path.splitext(path)[0] + ".gps.json") as fp:
+            g = json.load(fp)
+        lat, lon = float(g.get("Latitude") or 0), float(g.get("Longitude") or 0)
+        return {"lat": round(lat, 6), "lon": round(lon, 6)} if (lat or lon) else None
+    except (OSError, ValueError, TypeError, json.JSONDecodeError):
+        return None
+
+
 EAPOL_SIG = re.compile(rb"\x88\x8e[\x01\x02]\x03")   # EtherType 0x888e, EAPOL version 1 or 2, type 3 (EAPOL-Key)
 PMKID_KDE = b"\xdd\x14\x00\x0f\xac\x04"               # a vendor KDE carrying a PMKID (OUI 00:0f:ac, type 4)
 _quality_cache = {}
@@ -708,17 +722,18 @@ def _crack_rows_impl(limit):
     for name, mtime in entries[:limit]:
         path = os.path.join(d, name)
         quality = _handshake_quality(path)
+        loc = _gps_sidecar(path)
         m = HANDSHAKE_RE.match(name)
         essid, bssid = (m.group(1), m.group(2).lower()) if m else (os.path.splitext(name)[0], None)
         if bssid and bssid in pot:
             pot_essid, password = pot[bssid]
             rows.append({"file": name, "name": pot_essid or essid or "(hidden)", "bssid": bssid,
-                         "status": "cracked", "password": password, "time": mtime, "quality": quality})
+                         "status": "cracked", "password": password, "time": mtime, "quality": quality, "loc": loc})
             continue
         code = db_base.get(name)
         status = CRACK_STATUS.get(code, "queued") if code is not None else ("queued" if have_db else "unknown")
         rows.append({"file": name, "name": essid or "(hidden)", "bssid": bssid, "status": status,
-                     "password": None, "time": mtime, "quality": quality})
+                     "password": None, "time": mtime, "quality": quality, "loc": loc})
     return rows
 
 
@@ -728,13 +743,15 @@ def crack_rows(limit=300):
 
 
 def crack_summary(rows=None):
-    """{"total", "cracked", "uploaded", "queued", "invalid", "unknown"} counted from crack_rows()."""
+    """{"total", "cracked", "uploaded", "queued", "invalid", "unknown", "junk", "located"} counted from crack_rows()."""
     rows = crack_rows() if rows is None else rows
-    out = {"total": len(rows), "cracked": 0, "uploaded": 0, "queued": 0, "invalid": 0, "unknown": 0, "junk": 0}
+    out = {"total": len(rows), "cracked": 0, "uploaded": 0, "queued": 0, "invalid": 0, "unknown": 0, "junk": 0, "located": 0}
     for r in rows:
         out[r["status"]] = out.get(r["status"], 0) + 1
         if r.get("quality") == "empty":
             out["junk"] += 1
+        if r.get("loc"):
+            out["located"] += 1
     return out
 
 
@@ -2118,7 +2135,8 @@ def menu_hits(menu):
     common = [((220, 268, 320, 308), ("cal", None)), ((380, 268, 452, 308), ("close", None))] + tabs
     if tab == "system":
         return [((28, 268, 118, 308), ("refresh", None)), ((124, 268, 214, 308), ("dim", None)),
-                ((28, 166, 236, 200), ("mode", None)), ((242, 166, 452, 200), ("overheat", None)), ((28, 208, 152, 248), ("power", "restart")),
+                ((28, 166, 176, 200), ("mode", None)), ((182, 166, 320, 200), ("overheat", None)),
+                ((326, 166, 452, 200), ("atkmode", None)), ((28, 208, 152, 248), ("power", "restart")),
                 ((158, 208, 282, 248), ("power", "reboot")), ((288, 208, 412, 248), ("power", "shutdown"))] + common
     act = {"themes": "pick", "awards": "award", "layout": "adjust", "crack": "crackrow"}.get(tab, "toggle")
     hits = [((28, 44 + i * 44, 452, 44 + i * 44 + 40), (act, n))
@@ -2190,7 +2208,7 @@ def draw_menu(img, menu, theme):
             ask = bool(menu.get("confirm")) and menu["confirm"][0] == key
             other = "AUTO" if menu.get("mode_now") == "MANU" else "MANU"
             if act == "mode":
-                label = "tap again: %s" % other if ask else "Mode: %s" % menu.get("mode_now", "?")
+                label = "tap again" if ask else menu.get("mode_now", "?")
             else:
                 label = "tap again" if ask else arg
             d.rounded_rectangle(rect, 8, fill=acc if ask else line, outline=acc, width=2)
@@ -2198,8 +2216,14 @@ def draw_menu(img, menu, theme):
         elif act == "overheat":
             on = menu.get("overheat", False)
             d.rounded_rectangle(rect, 8, fill=acc if on else line, outline=acc, width=2)
-            d.text(((x0 + x1) // 2, (y0 + y1) // 2), "Hot-off: %s" % ("ON" if on else "OFF"), font=_font(16, True),
+            d.text(((x0 + x1) // 2, (y0 + y1) // 2), "Hot-off: %s" % ("ON" if on else "OFF"), font=_font(15, True),
                    fill=bg if on else fg, anchor="mm")
+        elif act == "atkmode":
+            m = menu.get("atkmode", "aggressive")
+            on = m != "aggressive"
+            d.rounded_rectangle(rect, 8, fill=acc if on else line, outline=acc, width=2)
+            d.text(((x0 + x1) // 2, (y0 + y1) // 2), {"aggressive": "AGGRESSIVE", "passive": "PASSIVE", "home": "HOME DEFENSE"}[m],
+                   font=_font(13, True), fill=bg if on else fg, anchor="mm")
         elif act == "tab":
             on = arg == tab
             d.rectangle(rect, fill=acc if on else line, outline=acc, width=1)
@@ -2347,14 +2371,20 @@ def shifted(xy, dx, dy):
     return tuple(v + (dx if i % 2 == 0 else dy) for i, v in enumerate(xy))
 
 
+ATTACK_MODES = ("aggressive", "passive", "home")
+
+
 def clean_settings(cfg):
-    """Validated settings: whether an overheating Pi turns itself off (and at what temperature, after how long)."""
+    """Validated settings: whether an overheating Pi turns itself off (and at what temperature, after how long),
+    achievements, and the attack mode (aggressive: unchanged; passive: deauth/associate off; home: the same, plus a
+    watch for a new device broadcasting one of your whitelisted network names)."""
     if not isinstance(cfg, dict):
         raise ValueError("settings must be a JSON object")
     return {"overheat_off": bool(cfg.get("overheat_off", False)),
             "overheat_temp": _num(cfg.get("overheat_temp", 85), 70, 95, "overheat_temp"),
             "overheat_seconds": _num(cfg.get("overheat_seconds", 60), 10, 600, "overheat_seconds"),
-            "achievements": bool(cfg.get("achievements", True))}
+            "achievements": bool(cfg.get("achievements", True)),
+            "mode": cfg.get("mode") if cfg.get("mode") in ATTACK_MODES else "aggressive"}
 
 
 def _clock(value, what):
@@ -2438,11 +2468,25 @@ def draw_banner(img, text):
     d.text((img.width // 2, 27), text, font=font, fill=(255, 255, 255), anchor="mm")
 
 
+TOAST_MAX_W = 440   # leaves a margin either side of the 480 px screen
+
+
+def _fit_text(d, text, font, max_w):
+    """text, or as much of it as fits max_w with an ellipsis, so a long message shortens gracefully instead of
+    getting cut off at a fixed character count (which can land mid-word)."""
+    if d.textlength(text, font=font) <= max_w:
+        return text
+    while text and d.textlength(text + "…", font=font) > max_w:
+        text = text[:-1]
+    return text.rstrip() + "…" if text else "…"
+
+
 def draw_toast(img, text, theme):
     """A small label at the bottom centre of the screen (the new theme's name, and so on)."""
     d = ImageDraw.Draw(img)
     bg, fg, acc = _hex(theme["bg"]), _hex(theme["fg"]), _hex(theme["accent"])
     font = _font(16, True)
+    text = _fit_text(d, text, font, TOAST_MAX_W)
     w = int(d.textlength(text, font=font)) + 28
     x0, y0 = (img.width - w) // 2, 276
     d.rounded_rectangle((x0, y0, x0 + w, y0 + 26), 10, fill=_mixc(bg, (0, 0, 0), 0.45), outline=acc, width=2)
@@ -2450,6 +2494,7 @@ def draw_toast(img, text, theme):
 
 
 DISCLAIMER_FILE = os.path.join(THEME_DIR, "disclaimer.json")
+HOME_WATCH_FILE = os.path.join(THEME_DIR, "home_watch.json")
 DISCLAIMER_TEXT = ("For authorized security testing, research and education only. Only use this on networks and "
                    "devices you own or have explicit permission to test. You are responsible for complying with "
                    "all applicable laws.")
@@ -2468,9 +2513,24 @@ def draw_notice(img, text, theme):
     d.text((240, 242), "tap anywhere to continue", font=_font(13, True), fill=acc, anchor="mm")
 
 
+def _pwa_icon(size, theme):
+    """A home-screen icon for the web editor: a simple face in the active theme's colors, so 'Add to Home Screen'
+    on a phone looks like it belongs, instead of a generic browser globe."""
+    fg, bg = _hex(theme["fg"]), _hex(theme["bg"])
+    img = Image.new("RGB", (size, size), bg)
+    d = ImageDraw.Draw(img)
+    w = max(2, size // 22)
+    cx, cy, r = size / 2, size * 0.46, size * 0.13
+    for dx in (-0.27, 0.27):
+        ex = cx + dx * size
+        d.ellipse((ex - r, cy - r, ex + r, cy + r), outline=fg, width=w)
+    d.arc((cx - size * 0.17, cy + size * 0.02, cx + size * 0.17, cy + size * 0.26), 20, 160, fill=fg, width=w)
+    return img
+
+
 class ThemeManager(plugins.Plugin):
     __author__ = "theme_manager contributors"
-    __version__ = "2.10.0"
+    __version__ = "2.11.0"
     __license__ = "GPL3"
     __description__ = "Theme engine for the 3.5 inch display: colors, effects, animations, custom text, web GUI."
 
@@ -2491,6 +2551,8 @@ class ThemeManager(plugins.Plugin):
         self._gps_wanted = 0
         self._toast = None
         self._notice = None
+        self._mode_saved = None
+        self._home_watch = {}
         self._ach = clean_achievements(None)
         self._ach_lock = threading.Lock()
         self._ach_dirty = False
@@ -3088,6 +3150,7 @@ class ThemeManager(plugins.Plugin):
             self._load_achievements()
         if not cfg["overheat_off"]:
             self._hot_since = self._shutdown_at = 0
+        self._apply_mode()
 
     def save_settings(self, cfg):
         """Validate and store new settings (the web editor and the touch menu use this)."""
@@ -3099,7 +3162,77 @@ class ThemeManager(plugins.Plugin):
             self._load_achievements()
         if not self._settings["overheat_off"]:
             self._hot_since = self._shutdown_at = 0
+        self._apply_mode()
         return self._settings
+
+    def _cycle_atkmode(self):
+        cur = ATTACK_MODES.index(self._settings.get("mode", "aggressive"))
+        self.save_settings(dict(self._settings, mode=ATTACK_MODES[(cur + 1) % len(ATTACK_MODES)]))
+        self.toast("mode: %s" % self._settings["mode"], seconds=3)
+        self._refresh_now()
+
+    def _apply_mode(self):
+        """Push the attack mode into pwnagotchi's own live config: passive and home turn deauth/associate off (takes
+        effect immediately, no restart); aggressive restores whatever the user's config.toml said. Display-only
+        features elsewhere (like the old radar) never touched this; this is the one place that actually does."""
+        try:
+            p = self._view._agent.config()["personality"]
+        except Exception:
+            return
+        if self._settings.get("mode", "aggressive") == "aggressive":
+            if self._mode_saved is not None:
+                p["deauth"], p["associate"] = self._mode_saved
+                self._mode_saved = None
+        elif self._mode_saved is None:
+            self._mode_saved = (p.get("deauth", True), p.get("associate", True))
+            p["deauth"] = p["associate"] = False
+
+    def _load_home_watch(self):
+        try:
+            with open(HOME_WATCH_FILE) as fp:
+                data = json.load(fp)
+            self._home_watch = {k: list(v) for k, v in data.items() if isinstance(k, str) and isinstance(v, list)} if isinstance(data, dict) else {}
+        except (OSError, ValueError):
+            self._home_watch = {}
+
+    def _save_home_watch(self):
+        try:
+            os.makedirs(THEME_DIR, exist_ok=True)
+            write_json(HOME_WATCH_FILE, self._home_watch)
+        except OSError as e:
+            logging.debug("[theme_manager] could not save home_watch.json: %s", e)
+
+    def on_wifi_update(self, agent, access_points):
+        """Home Defense mode only: alert if a device we haven't seen before starts broadcasting one of your own
+        (whitelisted) network names -- a classic sign of a rogue/evil-twin access point. Aggressive and passive
+        modes ignore this entirely; it never influences what pwnagotchi itself does."""
+        if self._settings.get("mode") != "home":
+            return
+        try:
+            whitelist = {s for s in (agent.config()["main"].get("whitelist") or []) if isinstance(s, str) and s}
+        except Exception:
+            whitelist = set()
+        if not whitelist:
+            return
+        changed = False
+        for ap in access_points:
+            ssid = ap.get("hostname") or ""
+            if ssid not in whitelist:
+                continue
+            mac = (ap.get("mac") or "").lower().replace(":", "")
+            if not mac:
+                continue
+            known = self._home_watch.setdefault(ssid, [])
+            if mac in known:
+                continue
+            if known:
+                logging.critical("[theme_manager] home defense: '%s' seen from an unrecognized device (%s)", ssid, mac)
+                self.toast("possible rogue AP: %s" % ssid, seconds=8, now=time.time())
+                self._refresh_now()
+            known.append(mac)
+            changed = True
+        if changed:
+            self._save_home_watch()
 
     def _toggle_overheat(self):
         on = not self._settings["overheat_off"]
@@ -3193,7 +3326,8 @@ class ThemeManager(plugins.Plugin):
         self._refresh_now()
 
     def toast(self, text, seconds=TOAST_S, now=None):
-        self._toast = (str(text)[:30], (time.time() if now is None else now) + seconds)
+        """Stores the full text; draw_toast shortens it to fit the screen (with an ellipsis) at draw time."""
+        self._toast = (str(text), (time.time() if now is None else now) + seconds)
 
     def menu_tick(self, now):
         if self._try_until and now >= self._try_until:
@@ -3315,6 +3449,9 @@ class ThemeManager(plugins.Plugin):
                 elif act == "overheat":
                     self._toggle_overheat()
                     return
+                elif act == "atkmode":
+                    self._cycle_atkmode()
+                    return
                 elif act == "award":
                     info = menu["award_info"].get(arg)
                     if info:
@@ -3330,6 +3467,8 @@ class ThemeManager(plugins.Plugin):
                             msgs = {"invalid": "invalid capture", "uploaded": "uploaded, not cracked yet",
                                     "queued": "waiting to upload", "unknown": "status unknown (wpa-sec plugin not active)"}
                             msg = msgs.get(info["status"], "?") + QUALITY_NOTE.get(info.get("quality"), "")
+                        if info.get("loc"):
+                            msg += "  ·  %.4f, %.4f" % (info["loc"]["lat"], info["loc"]["lon"])
                         self.toast(msg, seconds=4, now=now)
                         self._refresh_now()
                     return
@@ -3368,6 +3507,7 @@ class ThemeManager(plugins.Plugin):
     # ---- guard: keep the Pi cool
     def _guard_tick(self, now):
         self._tick_achievements(now)
+        self._apply_mode()   # idempotent; a safety net in case the agent wasn't ready yet when settings first loaded
         if self._shutdown_at:
             self._countdown(now)
         if now >= self._next_temp:
@@ -3469,6 +3609,7 @@ class ThemeManager(plugins.Plugin):
     def _fill_status(self, menu):
         menu["dim"] = self._display_cfg["dim"]
         menu["overheat"] = self._settings["overheat_off"]
+        menu["atkmode"] = self._settings.get("mode", "aggressive")
         menu["lines"] = [_expand(t) for t in STATUS_LINES]
         menu["mode_now"] = self._agent_mode()
 
@@ -3773,6 +3914,7 @@ class ThemeManager(plugins.Plugin):
         self._load_display()
         self._load_settings()
         self._load_layout()
+        self._load_home_watch()
         self._maybe_show_disclaimer()
         global STAT_SOURCE
         STAT_SOURCE = self._live_stat
@@ -3902,7 +4044,6 @@ class ThemeManager(plugins.Plugin):
             if len(parts) == 4 and PACK_RE.fullmatch(parts[2]) and (parts[3] in MOODS or parts[3] == "default"):
                 frames = pack_frames(parts[2], parts[3])
                 if frames:
-                    import io
                     buf = io.BytesIO()
                     frames[0][0].save(buf, "PNG")
                     return Response(buf.getvalue(), mimetype="image/png", headers={"Cache-Control": "max-age=60"})
@@ -3913,6 +4054,26 @@ class ThemeManager(plugins.Plugin):
                 return Response(open(DOCS_FILE, encoding="utf-8").read(), mimetype="text/plain; charset=utf-8")
             except OSError:
                 return Response("README.md not found in " + THEME_DIR, status=404)
+
+        if path == "manifest.json":
+            return Response(json.dumps({
+                "name": "pwnagotchi Theme Manager", "short_name": "Themes", "start_url": ".", "scope": ".",
+                "display": "standalone", "background_color": "#0f1115", "theme_color": "#0f1115",
+                "icons": [{"src": "icon-192.png", "sizes": "192x192", "type": "image/png"},
+                          {"src": "icon-512.png", "sizes": "512x512", "type": "image/png"}]}),
+                mimetype="application/manifest+json")
+
+        if path in ("icon-192.png", "icon-512.png"):
+            size = 192 if path == "icon-192.png" else 512
+            img = _memo(("pwa-icon", size, self._active), (), lambda: _pwa_icon(size, self._theme))
+            buf = io.BytesIO()
+            img.save(buf, "PNG")
+            return Response(buf.getvalue(), mimetype="image/png", headers={"Cache-Control": "max-age=300"})
+
+        if path == "sw.js":
+            # No offline caching (this page is only useful with the live device behind it); it exists so phones
+            # treat the page as installable and use the manifest's name and icon on the home screen.
+            return Response("self.addEventListener('fetch',()=>{});", mimetype="application/javascript")
 
         if path == "api/preview":
             try:
@@ -4024,6 +4185,11 @@ PAGE = r"""<!doctype html><html><head><meta charset="utf-8">
 <meta name="viewport" content="width=device-width,initial-scale=1">
 <meta name="csrf_token" content="{{ csrf_token() }}">
 <title>Theme Manager</title>
+<link rel="manifest" href="manifest.json">
+<meta name="theme-color" content="#0f1115">
+<link rel="apple-touch-icon" href="icon-192.png">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-title" content="Themes">
 <style>
 :root{--bg:#0f1115;--panel:#181b22;--line:#2a2f3a;--text:#e6e6e6;--dim:#8a93a3;--acc:#4caf50}
 *{box-sizing:border-box}body{margin:0;background:var(--bg);color:var(--text);font:14px system-ui,sans-serif;padding:16px}
@@ -4088,6 +4254,7 @@ h2{font-size:12px;color:var(--dim);text-transform:uppercase;letter-spacing:1px;m
 {% raw %}<script>
 let CSRF=document.querySelector('meta[name="csrf_token"]').content;
 const base=location.pathname.replace(/\/$/,'');
+if('serviceWorker' in navigator)navigator.serviceWorker.register(base+'/sw.js').catch(()=>{});
 const $=id=>document.getElementById(id);
 const E=(tag,props,...kids)=>{const e=document.createElement(tag);
  for(const[k,v]of Object.entries(props||{})){
@@ -4308,7 +4475,7 @@ function panelCracking(){const p=E('div'),s=crack.summary;
  p.append(E('p',{style:'color:var(--dim);margin:0 0 10px'},crack.wpa_sec?'From the wpa-sec plugin\'s own upload/crack tracking. Read-only: nothing here changes what gets attacked.':
   'The wpa-sec plugin is not tracking uploads, so only what has actually been cracked is known. Handshakes otherwise show as \'unknown\'.'));
  p.append(E('div',{class:'wpa-stats',style:'display:grid;grid-template-columns:repeat(auto-fit,minmax(90px,1fr));gap:8px;margin-bottom:12px'},
-  [['cracked','Cracked'],['queued','Queued'],['uploaded','Uploaded'],['invalid','Invalid'],['junk','Junk'],['total','Total']].map(([k,l])=>
+  [['cracked','Cracked'],['queued','Queued'],['uploaded','Uploaded'],['invalid','Invalid'],['junk','Junk'],['located','Located'],['total','Total']].map(([k,l])=>
    E('div',{class:'statcard',style:'text-align:center;cursor:default;background:var(--panel);border:1px solid var(--line);border-radius:8px;padding:8px'},E('div',{style:'font-size:22px'},String(s[k])),E('small',{style:'color:var(--dim)'},l)))));
  if(!crack.rows.length){p.append(E('p',{style:'color:var(--dim)'},'No handshakes yet.'));return p}
  const PILL={cracked:['PWND',1],uploaded:['WAIT',0],queued:['NEW',0],invalid:['BAD',0],unknown:['?',0]};
@@ -4317,7 +4484,9 @@ function panelCracking(){const p=E('div'),s=crack.summary;
   p.append(E('div',{class:'erow set',style:done?'border-color:var(--acc)':''},
    E('span',{class:'ename',style:'width:170px'},r.name||'(hidden)'),
    E('span',{class:'inh',style:'flex:1'},(r.status==='cracked'?r.password:(r.bssid||''))+'  · '+(QUAL[r.quality]||r.quality)),
+   r.loc?E('a',{href:'https://www.openstreetmap.org/?mlat='+r.loc.lat+'&mlon='+r.loc.lon+'#map=17/'+r.loc.lat+'/'+r.loc.lon,target:'_blank',style:'font-size:11px;color:var(--acc)'},'map'):null,
    E('span',{style:'padding:2px 10px;border-radius:10px;font-size:11px;background:'+(done?'var(--acc)':'transparent')+';border:1px solid var(--acc);color:'+(done?'var(--bg)':'var(--text)')},label)))}
+ if(!crack.summary.located)p.append(E('p',{style:'color:var(--dim);margin-top:10px'},'No locations yet: turn on the gps plugin to tag new captures with a location automatically.'));
  return p}
 let cfg={settings:{},display:{dim:1,night:null,idle:null},limits:{}};
 async function loadSettings(){try{cfg=await(await fetch(base+'/api/settings')).json()}catch(e){}}
@@ -4325,6 +4494,9 @@ async function saveSettings(){const j=await(await post('settings',{settings:cfg.
  if(j.ok){cfg.settings=j.settings;cfg.display=j.display;say('settings saved')}else say(j.error||'could not save the settings')}
 function panelSettings(){const p=E('div'),s=cfg.settings,d=cfg.display;
  const num=(v,cb,mn,mx,st)=>E('input',{type:'number',min:mn,max:mx,step:st||1,value:v,oninput:e=>{const x=parseFloat(e.target.value);if(!isNaN(x))cb(clamp(x,mn,mx))}});
+ p.append(E('h2',{},'Attack mode'),E('div',{class:'row'},
+  select([['aggressive','Aggressive (normal)'],['passive','Passive recon'],['home','Home defense']],s.mode||'aggressive',v=>{s.mode=v})),
+  E('p',{style:'color:var(--dim);margin:6px 0 14px'},'Aggressive is normal pwnagotchi behavior. Passive turns deauth and association off right away, no restart needed; Aggressive puts them back. Home defense does the same as Passive, and also watches for a new device broadcasting one of the network names in your whitelist, a common sign of a rogue access point.'));
  p.append(E('h2',{},'Overheating'),E('div',{class:'row'},
   check('switch the Pi off when it stays too hot',s.overheat_off,on=>{s.overheat_off=on;panel()}),
   field('above (°C)',num(s.overheat_temp,v=>s.overheat_temp=v,70,95)),
@@ -4485,6 +4657,15 @@ if __name__ == "__main__":
         os.makedirs(THEME_DIR, exist_ok=True)
         write_json(SETTINGS_FILE, cfg)
         print(json.dumps(cfg))
+    elif cmd == "mode" and len(a) in (1, 2):
+        if len(a) == 2 and a[1] not in ATTACK_MODES:
+            sys.exit("usage: mode [%s]" % "|".join(ATTACK_MODES))
+        cfg = clean_settings(json.load(open(SETTINGS_FILE))) if os.path.exists(SETTINGS_FILE) else clean_settings({})
+        if len(a) == 2:
+            cfg["mode"] = a[1]
+            os.makedirs(THEME_DIR, exist_ok=True)
+            write_json(SETTINGS_FILE, cfg)
+        print(cfg["mode"])
     elif cmd == "layout" and len(a) == 2 and a[1] in ("show", "reset"):
         if a[1] == "reset":
             write_json(LAYOUT_FILE, {"offsets": {}})
@@ -4497,7 +4678,8 @@ if __name__ == "__main__":
     elif cmd == "cracking" and len(a) == 2 and a[1] == "list":
         for r in crack_rows():
             extra = ": %s" % r["password"] if r["status"] == "cracked" else ""
-            print("%-8s %-9s %-24s %s%s" % (r["status"], r["quality"], r["name"] or "(hidden)", r["bssid"] or "?", extra))
+            loc = " @%.4f,%.4f" % (r["loc"]["lat"], r["loc"]["lon"]) if r.get("loc") else ""
+            print("%-8s %-9s %-24s %s%s%s" % (r["status"], r["quality"], r["name"] or "(hidden)", r["bssid"] or "?", extra, loc))
     elif cmd == "validate" and len(a) == 2:
         try:
             t = _clean(json.load(open(a[1])))
