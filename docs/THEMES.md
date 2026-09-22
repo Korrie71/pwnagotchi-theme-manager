@@ -294,7 +294,7 @@ The first time, the menu asks for a quick **touch calibration**: tap the four `+
 controller reports raw numbers, so this teaches the plugin where your screen is. It only needs doing once and is saved in
 `/etc/pwnagotchi/themes/touch.json`. Use the `calibrate` button in the menu (or delete `touch.json`) to redo it.
 
-The menu has five tabs. **Themes** switches theme. **Plugins** lists every installed plugin with an `ON`/`OFF` switch: tap a
+The menu has seven tabs. **Themes** switches theme. **Plugins** lists every installed plugin with an `ON`/`OFF` switch: tap a
 row to enable or disable that plugin right away, exactly like the switch on the web plugin page (the change is saved in
 `config.toml` and lasts after a reboot). While a plugin is switching the row shows `...`; enabling one can take a few
 seconds. `theme_manager` itself is never listed, so you can't switch off the menu from the menu. Pwnagotchi rewrites
@@ -324,7 +324,17 @@ installed and enabled) followed by every captured handshake, newest first, each 
 (cracked, tap it to see the password), `WAIT` (uploaded, not cracked yet), `NEW` (waiting to upload), `BAD` (wpa-sec
 rejected it) or `?` (wpa-sec isn't tracking it). Nothing here changes what gets attacked; it only reads the same
 sqlite database and potfile the `wpa-sec` plugin already keeps. The web editor has the same information in its
-Cracking tab. `theme_manager.py cracking` prints the summary as JSON, `cracking list` prints every row.
+Cracking tab, plus a **Map** tab: an OpenStreetMap view (loaded only when you open the tab) pinning every handshake
+that has a saved location, with a plain list and per-row "open on OpenStreetMap" links if the map itself cannot load.
+This does not replace `webgpsmap` (which maps every access point it sees); it only ties a location to your own
+captures. `theme_manager.py cracking` prints the summary as JSON, `cracking list` prints every row.
+
+**Radar** is a sonar-style display of nearby networks: a rotating sweep line with a fading trail, and a blip for each
+network bettercap currently sees. Distance from the centre reflects signal strength (closer = stronger); each device
+gets a bearing derived from its MAC address, since there is no real direction data, so it stays in the same spot
+between scans instead of jumping around. Tap a blip for its name, encryption, client count, signal and whether you
+already have a handshake for it (shown dimmed and ranked lower). Like the Cracking tab, this is purely a display: it
+never changes what pwnagotchi decides to attack. The web editor's Radar tab shows the same sweep, redrawn live.
 
 Each handshake also gets a **quality** guess, worked out locally from the capture itself instead of waiting for
 wpa-sec: a full handshake, a PMKID (crackable without a client ever connecting), only a partial capture, or empty

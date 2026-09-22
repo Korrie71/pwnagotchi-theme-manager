@@ -32,6 +32,7 @@ import select
 import shutil
 import socket
 import sqlite3
+import hashlib
 import struct
 import textwrap
 import threading
@@ -753,6 +754,28 @@ def crack_summary(rows=None):
         if r.get("loc"):
             out["located"] += 1
     return out
+
+
+# ---------------------------------------------------------------- radar (a sonar-style view, display only)
+RADAR_MAX = 40      # blips kept
+RADAR_SWEEP_DEG = 40.0   # degrees per second the sweep turns
+
+
+def _radar_angle(mac):
+    """A stable, arbitrary bearing for a device: we have no real direction, but the same device should always show
+    up at the same spot on the sonar rather than jumping around every scan."""
+    return (int(hashlib.md5(mac.encode()).hexdigest(), 16) % 3600) / 10.0
+
+
+def _radar_score(ap, captured):
+    rssi = ap.get("rssi")
+    sig = max(0.0, min(1.0, (rssi + 90) / 60.0)) if isinstance(rssi, (int, float)) else 0.3
+    score = sig * 40 + min(len(ap.get("clients") or []), 5) * 12
+    if (ap.get("mac") or "").lower().replace(":", "") in captured:
+        score -= 60
+    if "WPA3" in (ap.get("encryption") or "").upper():
+        score -= 15
+    return round(score, 1)
 
 
 def _crack_summary_text(summary):
@@ -2041,7 +2064,7 @@ CONFIRM_S = 4.0          # a power button must be tapped twice within this time
 GPS_TOKENS = ("gps", "lat", "lon", "sats")
 STATUS_LINES = ("CPU {temp}  load {cpu}  RAM {mem}", "IP {ip}", "GPS {gps}  {lat} {lon}",
                 "Up {uptime}  Power {power}  Bat {battery}", "Pwned {handshakes}  Cracked {cracked}  Session {session}")
-TAB_NAMES = ("themes", "plugins", "system", "awards", "layout", "crack")
+TAB_NAMES = ("themes", "plugins", "system", "awards", "layout", "crack", "radar")
 TAB_WINDOW = 5      # tabs shown at once before it needs '<'/'>' to see the rest: as many as fit comfortably
 TAB_ARROW_W = 36
 PROTECTED_PLUGINS = ('theme_manager',)   # never listed: switching it off would remove the menu itself
@@ -2141,6 +2164,21 @@ def adjust_hits(menu):
             ((x0 + 238, r2, x0 + 352, r2 + 28), ("done", None))]
 
 
+RADAR_CX, RADAR_CY, RADAR_R = 240, 156, 96   # the sonar circle's centre and radius, in panel pixels
+
+
+def radar_radius_frac(rssi):
+    """0 (dead centre, strong signal) .. 1 (the outer ring, weak signal)."""
+    sig = max(0.0, min(1.0, ((rssi if isinstance(rssi, (int, float)) else -100) + 90) / 60.0))
+    return max(0.08, min(0.95, 1 - sig))
+
+
+def radar_pos(angle_deg, radius_frac):
+    """A bearing (0 = up, like a compass) and a 0..1 radius -> a screen position on the sonar."""
+    rad = math.radians(angle_deg - 90)
+    return RADAR_CX + radius_frac * RADAR_R * math.cos(rad), RADAR_CY + radius_frac * RADAR_R * math.sin(rad)
+
+
 def menu_hits(menu):
     """[(rect, (action, arg))] for the current menu page, in upright screen pixels."""
     tab, page = menu.get("tab", "themes"), menu["page"]
@@ -2156,6 +2194,12 @@ def menu_hits(menu):
                 ((28, 166, 176, 200), ("mode", None)), ((182, 166, 320, 200), ("overheat", None)),
                 ((326, 166, 452, 200), ("atkmode", None)), ((28, 208, 152, 248), ("power", "restart")),
                 ((158, 208, 282, 248), ("power", "reboot")), ((288, 208, 412, 248), ("power", "shutdown"))] + common
+    if tab == "radar":
+        hits = []
+        for r in menu.get("radar", []):
+            x, y = radar_pos(r["angle"], radar_radius_frac(r["rssi"]))
+            hits.append(((x - 15, y - 15, x + 15, y + 15), ("radarblip", r["mac"])))
+        return hits + common
     act = {"themes": "pick", "awards": "award", "layout": "adjust", "crack": "crackrow"}.get(tab, "toggle")
     hits = [((28, 44 + i * 44, 452, 44 + i * 44 + 40), (act, n))
             for i, n in enumerate(menu_items(menu)[page * MENU_ROWS:(page + 1) * MENU_ROWS])]
@@ -2189,6 +2233,25 @@ def draw_adjust(d, menu, bg, fg, acc, panel, line):
         d.text(((rx0 + rx1) // 2, (ry0 + ry1) // 2), label, font=_font(20 if big else 16, True), fill=bg if act == "done" else fg, anchor="mm")
 
 
+def draw_radar(d, menu, bg, fg, acc, line):
+    """The sonar chrome: range rings and a sweep that rotates continuously while the tab is open. Blips themselves
+    are drawn per-hit in draw_menu (they share their tap targets, computed once in menu_hits)."""
+    for k in (1 / 3, 2 / 3, 1.0):
+        r = RADAR_R * k
+        d.ellipse((RADAR_CX - r, RADAR_CY - r, RADAR_CX + r, RADAR_CY + r), outline=line, width=1)
+    d.line((RADAR_CX - RADAR_R, RADAR_CY, RADAR_CX + RADAR_R, RADAR_CY), fill=line, width=1)
+    d.line((RADAR_CX, RADAR_CY - RADAR_R, RADAR_CX, RADAR_CY + RADAR_R), fill=line, width=1)
+    sweep = (menu.get("t", 0.0) * RADAR_SWEEP_DEG) % 360
+    for trail in range(10):     # a fading trail behind the sweep line, brightest at the front
+        ang = sweep - trail * 3
+        x, y = radar_pos(ang, 1.0)
+        d.line((RADAR_CX, RADAR_CY, x, y), fill=_mixc(bg, acc, 1 - trail / 10), width=2 if trail == 0 else 1)
+    d.ellipse((RADAR_CX - 3, RADAR_CY - 3, RADAR_CX + 3, RADAR_CY + 3), fill=acc)
+    rows = menu.get("radar", [])
+    text = "no networks seen yet" if not rows else "%d seen  ·  best: %s" % (len(rows), rows[0]["name"])
+    d.text((RADAR_CX, 50), text, font=_font(13, True), fill=fg, anchor="mm")
+
+
 def draw_menu(img, menu, theme):
     """Draw the menu (or the calibration prompt) onto an upright RGB frame."""
     d = ImageDraw.Draw(img)
@@ -2219,6 +2282,8 @@ def draw_menu(img, menu, theme):
     if tab == "system":
         for i, text in enumerate(menu.get("lines", ())):
             d.text((32, 46 + i * 24), text, font=_font(16), fill=fg)
+    if tab == "radar":
+        draw_radar(d, menu, bg, fg, acc, line)
     for rect, (act, arg) in menu_hits(menu):
         x0, y0, x1, y1 = rect
         if act in ("mode", "power"):
@@ -2289,6 +2354,16 @@ def draw_menu(img, menu, theme):
                 px0, px1 = x1 - 78, x1 - 10
                 d.rounded_rectangle((px0, y0 + 7, px1, y1 - 7), 10, fill=acc if done else panel, outline=acc, width=2)
                 d.text(((px0 + px1) // 2, (y0 + y1) // 2), label, font=_font(14, True), fill=bg if done else fg, anchor="mm")
+        elif act == "radarblip":
+            info = next((r for r in menu.get("radar", []) if r["mac"] == arg), None)
+            if info:
+                cx, cy = (x0 + x1) // 2, (y0 + y1) // 2
+                hot = info["clients"] > 0 and not info["captured"]
+                col = _mixc(fg, bg, 0.5) if info["captured"] else (acc if hot else fg)
+                r = 5 if hot else 4
+                d.ellipse((cx - r, cy - r, cx + r, cy + r), fill=col)
+                if hot:
+                    d.ellipse((cx - r - 3, cy - r - 3, cx + r + 3, cy + r + 3), outline=col, width=1)
         elif act == "resetall":
             ask = bool(menu.get("confirm")) and menu["confirm"][0] == "resetall"
             d.rectangle(rect, fill=acc if ask else line, outline=acc, width=1)
@@ -2548,7 +2623,7 @@ def _pwa_icon(size, theme):
 
 class ThemeManager(plugins.Plugin):
     __author__ = "theme_manager contributors"
-    __version__ = "2.11.2"
+    __version__ = "2.12.0"
     __license__ = "GPL3"
     __description__ = "Theme engine for the 3.5 inch display: colors, effects, animations, custom text, web GUI."
 
@@ -2571,6 +2646,9 @@ class ThemeManager(plugins.Plugin):
         self._notice = None
         self._mode_saved = None
         self._home_watch = {}
+        self._radar = []
+        self._radar_at = 0
+        self._radar_lock = threading.Lock()
         self._ach = clean_achievements(None)
         self._ach_lock = threading.Lock()
         self._ach_dirty = False
@@ -2909,6 +2987,9 @@ class ThemeManager(plugins.Plugin):
                 self._fill_status(menu)
             elif menu.get("tab") == "crack" and menu["mode"] == "list":
                 self._sync_crack_menu(menu)
+            elif menu.get("tab") == "radar" and menu["mode"] == "list":
+                self._sync_radar_menu(menu)
+            menu["t"] = t
             draw_menu(img, menu, self._theme)
         toast = self._toast
         if toast is not None:
@@ -2981,15 +3062,20 @@ class ThemeManager(plugins.Plugin):
             self._menu = {"mode": mode, "tab": tab, "page": 0, "tab_scroll": TAB_NAMES.index(tab),
                           "pages": {t: 0 for t in TAB_NAMES}, "confirm": None, "awards_on": self._settings["achievements"],
                           "awards": [a[0] for a in ACHIEVEMENTS] if self._settings["achievements"] else [], "layout": [], "layout_info": {},
-                          "crack": [], "crack_info": {},
+                          "crack": [], "crack_info": {}, "radar": [],
                           "award_info": {r["id"]: r for r in self.award_rows()}, "plugins": self._plugin_names(),
                           "on": set(plugins.loaded), "busy": set(), "failed": set(), "step": 0, "raw": [], "names": list(themes),
                           "colors": {n: t for n, t in themes.items()}, "active": self._active,
                           "until": now + (CALIB_TIMEOUT if mode == "calib" else MENU_TIMEOUT)}
         self._sync_layout_menu(self._menu)
         self._sync_crack_menu(self._menu)
+        self._sync_radar_menu(self._menu)
         self._wake.set()
         self._refresh_now()
+
+    def _sync_radar_menu(self, menu):
+        rows, _ = self.radar_rows()
+        menu["radar"] = rows
 
     def _sync_crack_menu(self, menu):
         rows = crack_rows()
@@ -3223,6 +3309,39 @@ class ThemeManager(plugins.Plugin):
             logging.debug("[theme_manager] could not save home_watch.json: %s", e)
 
     def on_wifi_update(self, agent, access_points):
+        """pwnagotchi calls this with every network it currently sees. We only ever read it, for the Radar tab and
+        (in Home Defense mode) a rogue-AP watch; nothing here feeds back into what gets attacked."""
+        self._update_radar(access_points)
+        self._home_defense_check(agent, access_points)
+
+    def _update_radar(self, access_points):
+        """A snapshot for the sonar radar: display only, capped, sorted best first."""
+        try:
+            captured = {r["bssid"] for r in crack_rows() if r.get("bssid")}
+            rows = []
+            for ap in access_points:
+                mac = (ap.get("mac") or "").lower()
+                bare = mac.replace(":", "")
+                if not bare:
+                    continue
+                rows.append({"mac": mac, "name": ap.get("hostname") or "(hidden)", "channel": ap.get("channel", 0),
+                             "rssi": ap.get("rssi", -100), "clients": len(ap.get("clients") or []),
+                             "encryption": ap.get("encryption") or "?", "captured": bare in captured,
+                             "angle": _radar_angle(bare), "score": _radar_score(ap, captured)})
+            rows.sort(key=lambda r: -r["score"])
+            with self._radar_lock:
+                self._radar = rows[:RADAR_MAX]
+                self._radar_at = time.time()
+        except Exception as e:
+            logging.debug("[theme_manager] radar update: %s", e)
+
+    def radar_rows(self):
+        """(rows, age in seconds since the last scan, or None before the first one)."""
+        with self._radar_lock:
+            rows, at = list(self._radar), self._radar_at
+        return rows, (time.time() - at if at else None)
+
+    def _home_defense_check(self, agent, access_points):
         """Home Defense mode only: alert if a device we haven't seen before starts broadcasting one of your own
         (whitelisted) network names -- a classic sign of a rogue/evil-twin access point. Aggressive and passive
         modes ignore this entirely; it never influences what pwnagotchi itself does."""
@@ -3489,6 +3608,15 @@ class ThemeManager(plugins.Plugin):
                             msg = msgs.get(info["status"], "?") + QUALITY_NOTE.get(info.get("quality"), "")
                         if info.get("loc"):
                             msg += "  ·  %.4f, %.4f" % (info["loc"]["lat"], info["loc"]["lon"])
+                        self.toast(msg, seconds=4, now=now)
+                        self._refresh_now()
+                    return
+                elif act == "radarblip":
+                    info = next((r for r in menu.get("radar", []) if r["mac"] == arg), None)
+                    if info:
+                        msg = "%s: %s, %d clients, %d dBm" % (info["name"], info["encryption"], info["clients"], info["rssi"])
+                        if info["captured"]:
+                            msg += " (already have a handshake)"
                         self.toast(msg, seconds=4, now=now)
                         self._refresh_now()
                     return
@@ -3812,7 +3940,7 @@ class ThemeManager(plugins.Plugin):
             theme = self._current(start)
             busy = self._trans is not None or start < self._event_until + 0.3 or start < self._force[1] + 0.3
             m = self._menu
-            live_menu = m is not None and m.get("tab") == "system" and m["mode"] == "list"
+            live_menu = m is not None and m.get("tab") in ("system", "radar") and m["mode"] == "list"
             animate = busy or live_menu or self._face_multi or is_animated(theme)
             if self._heat is None and not live_menu:      # too hot: only redraw when the UI itself changes
                 animate = False
@@ -4032,6 +4160,15 @@ class ThemeManager(plugins.Plugin):
             rows = crack_rows()
             return jsonify({"summary": crack_summary(rows), "rows": rows[:200], "wpa_sec": _wpa_db_status() is not None})
 
+        if path == "api/radar":
+            rows, age = self.radar_rows()
+            return jsonify({"rows": rows, "age": age})
+
+        if path == "api/locations":
+            rows = [r for r in crack_rows() if r.get("loc")]
+            return jsonify({"rows": [{"name": r["name"], "bssid": r["bssid"], "status": r["status"],
+                                      "password": r["password"], "lat": r["loc"]["lat"], "lon": r["loc"]["lon"]} for r in rows]})
+
         if path == "api/backup":
             self._stat("backups", add=1)
             return Response(make_backup(), mimetype="application/zip",
@@ -4210,6 +4347,7 @@ PAGE = r"""<!doctype html><html><head><meta charset="utf-8">
 <link rel="apple-touch-icon" href="icon-192.png">
 <meta name="apple-mobile-web-app-capable" content="yes">
 <meta name="apple-mobile-web-app-title" content="Themes">
+<link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css">
 <style>
 :root{--bg:#0f1115;--panel:#181b22;--line:#2a2f3a;--text:#e6e6e6;--dim:#8a93a3;--acc:#4caf50}
 *{box-sizing:border-box}body{margin:0;background:var(--bg);color:var(--text);font:14px system-ui,sans-serif;padding:16px}
@@ -4291,7 +4429,7 @@ const KINDS=SCENE_KINDS_JS;
 const ANIM=['pulse','rainbow','glitch','rain','stars','noise'];
 const MOODS=['look_r','sleep','awake','bored','intense','cool','happy','grateful','excited','motivated','demotivated','smart','lonely','sad','angry','friend','broken','debug','upload','handshake'];
 const HOLDERS=['{name}','{time}','{date}','{cpu}','{temp}','{mem}','{uptime}','{ip}','{mode}','{gps}','{lat}','{lon}','{sats}','{handshakes}','{cracked}','{session}','{power}','{battery}'];
-const TABS=['Colors','Effects','Text','Elements','Moods','Faces','JSON','Layout','Awards','Cracking','Settings'];
+const TABS=['Colors','Effects','Text','Elements','Moods','Faces','JSON','Layout','Awards','Cracking','Radar','Map','Settings'];
 let S={active:'',themes:{}},sel='',cur={},info={elements:[],entities:[],packs:{}},tab='Colors',mood='sad',pvMood=null,busy=false,dirty=false,pvErr=false,timer=null;
 const say=t=>$('msg').textContent=t||'';
 /* After the plugin restarts (or the browser loses its session) the page's token is stale: fetch a fresh one and retry once. */
@@ -4508,6 +4646,73 @@ function panelCracking(){const p=E('div'),s=crack.summary;
    E('span',{style:'padding:2px 10px;border-radius:10px;font-size:11px;background:'+(done?'var(--acc)':'transparent')+';border:1px solid var(--acc);color:'+(done?'var(--bg)':'var(--text)')},label)))}
  if(!crack.summary.located)p.append(E('p',{style:'color:var(--dim);margin-top:10px'},'No locations yet: turn on the gps plugin to tag new captures with a location automatically.'));
  return p}
+let radar={rows:[],age:null};
+async function loadRadar(){try{radar=await(await fetch(base+'/api/radar')).json()}catch(e){}}
+function panelRadar(){const p=E('div');
+ p.append(E('p',{style:'color:var(--dim);margin:0 0 10px'},'Networks pwnagotchi currently sees, on a sonar-style display: closer to the middle means a stronger signal. Each device keeps the same bearing so it does not jump around. Display only, the same as the touch menu Radar tab: nothing here changes what actually gets attacked.'+
+  (radar.age==null?' No scan yet.':radar.age>120?' Last scan '+Math.round(radar.age/60)+' min ago.':'')));
+ const cv=E('canvas',{width:300,height:300,style:'display:block;margin:0 auto 12px;background:var(--panel);border:1px solid var(--line);border-radius:50%'});
+ p.append(cv);
+ const ctx=cv.getContext('2d'),cx=150,cy=150,R=130,started=performance.now();
+ const radiusFrac=rssi=>{const sig=Math.max(0,Math.min(1,((typeof rssi==='number'?rssi:-100)+90)/60));return Math.max(0.08,Math.min(0.95,1-sig))};
+ const pos=(angle,frac)=>{const rad=(angle-90)*Math.PI/180;return[cx+frac*R*Math.cos(rad),cy+frac*R*Math.sin(rad)]};
+ const cvar=name=>getComputedStyle(document.documentElement).getPropertyValue(name).trim();
+ function draw(){
+  if(tab!=='Radar')return;
+  const dim=cvar('--dim'),acc=cvar('--acc'),txt=cvar('--text');
+  ctx.clearRect(0,0,300,300);
+  ctx.strokeStyle=dim;ctx.lineWidth=1;
+  for(const k of[1/3,2/3,1]){ctx.beginPath();ctx.arc(cx,cy,R*k,0,Math.PI*2);ctx.stroke()}
+  ctx.beginPath();ctx.moveTo(cx-R,cy);ctx.lineTo(cx+R,cy);ctx.moveTo(cx,cy-R);ctx.lineTo(cx,cy+R);ctx.stroke();
+  const sweep=((performance.now()-started)/1000*40)%360;
+  for(let trail=0;trail<10;trail++){const[x,y]=pos(sweep-trail*3,1);
+   ctx.strokeStyle=acc;ctx.globalAlpha=1-trail/10;ctx.lineWidth=trail===0?2:1;
+   ctx.beginPath();ctx.moveTo(cx,cy);ctx.lineTo(x,y);ctx.stroke()}
+  ctx.globalAlpha=1;
+  for(const r of radar.rows){const[x,y]=pos(r.angle,radiusFrac(r.rssi));const hot=r.clients>0&&!r.captured;
+   ctx.fillStyle=r.captured?dim:(hot?acc:txt);
+   ctx.beginPath();ctx.arc(x,y,hot?4:3,0,Math.PI*2);ctx.fill()}
+  ctx.fillStyle=acc;ctx.beginPath();ctx.arc(cx,cy,3,0,Math.PI*2);ctx.fill();
+  requestAnimationFrame(draw)}
+ draw();
+ if(!radar.rows.length){p.append(E('p',{style:'color:var(--dim)'},'No networks seen yet.'));return p}
+ for(const r of radar.rows){
+  p.append(E('div',{class:'erow'+(r.captured?'':' set'),style:r.captured?'opacity:.55':''},
+   E('span',{class:'ename',style:'width:170px'},r.name),
+   E('span',{class:'inh',style:'flex:1'},'ch'+r.channel+'  '+r.rssi+'dBm  '+r.encryption+(r.captured?'  (have a handshake)':'')),
+   E('span',{style:'padding:2px 10px;border-radius:10px;font-size:11px;border:1px solid var(--acc);background:'+(r.clients&&!r.captured?'var(--acc)':'transparent')+';color:'+(r.clients&&!r.captured?'var(--bg)':'var(--text)')},r.clients+' STA')))}
+ return p}
+let leafletLoading=null;
+function loadLeaflet(){
+ if(typeof L!=='undefined')return Promise.resolve();
+ if(!leafletLoading)leafletLoading=new Promise((res,rej)=>{
+  const s=document.createElement('script');
+  s.src='https://unpkg.com/leaflet@1.9.4/dist/leaflet.js';
+  s.onload=res;s.onerror=()=>rej(new Error('failed to load leaflet'));
+  document.head.appendChild(s)});
+ return leafletLoading}
+let locations={rows:[]};
+async function loadLocations(){try{locations=await(await fetch(base+'/api/locations')).json()}catch(e){}}
+function panelMap(){const p=E('div'),count=locations.rows.length;
+ p.append(E('p',{style:'color:var(--dim);margin:0 0 10px'},'Handshakes that have a location, from the gps plugin (nothing new to turn on). '+count+' located so far. This project does not draw its own map elsewhere; webgpsmap already does that for every access point.'));
+ if(!count){p.append(E('p',{style:'color:var(--dim)'},'No located handshakes yet.'));return p}
+ const div=E('div',{id:'gpsmap',style:'height:360px;border-radius:8px;border:1px solid var(--line);background:var(--panel)'});
+ const status=E('p',{style:'color:var(--dim)'},'Loading map...');
+ p.append(div,status);
+ loadLeaflet().then(()=>{
+  if(tab!=='Map')return;
+  status.remove();
+  const map=L.map(div);
+  L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png',{attribution:'&copy; OpenStreetMap contributors',maxZoom:19}).addTo(map);
+  const layer=L.featureGroup(locations.rows.map(r=>L.marker([r.lat,r.lon]).bindPopup('<b>'+r.name+'</b><br>'+(r.status==='cracked'?r.password:r.status)))).addTo(map);
+  map.fitBounds(layer.getBounds(),{padding:[20,20],maxZoom:16})
+ }).catch(()=>{status.textContent='Could not load the map (no internet in this browser?). The list below still works.'});
+ for(const r of locations.rows){
+  p.append(E('div',{class:'erow set'},
+   E('span',{class:'ename',style:'width:170px'},r.name||'(hidden)'),
+   E('span',{class:'inh',style:'flex:1'},r.status==='cracked'?r.password:r.status),
+   E('a',{href:'https://www.openstreetmap.org/?mlat='+r.lat+'&mlon='+r.lon+'#map=17/'+r.lat+'/'+r.lon,target:'_blank',style:'font-size:11px;color:var(--acc)'},'open')))}
+ return p}
 let cfg={settings:{},display:{dim:1,night:null,idle:null},limits:{}};
 async function loadSettings(){try{cfg=await(await fetch(base+'/api/settings')).json()}catch(e){}}
 async function saveSettings(){const j=await(await post('settings',{settings:cfg.settings,display:cfg.display})).json();
@@ -4533,9 +4738,9 @@ function panelSettings(){const p=E('div'),s=cfg.settings,d=cfg.display;
   idleOn?[field('after (minutes)',num(d.idle.minutes,v=>d.idle.minutes=v,1,240)),slider('dim to',[5,100,5],Math.round(d.idle.dim*100),v=>{d.idle.dim=v/100})]:null));
  p.append(E('div',{class:'row'},E('button',{id:'setsave',onclick:saveSettings},'Save settings')));
  return p}
-const PANELS={Colors:panelColors,Effects:panelEffects,Text:panelText,Elements:panelElements,Moods:panelMoods,Faces:panelFaces,JSON:panelJson,Layout:panelLayout,Awards:panelAwards,Cracking:panelCracking,Settings:panelSettings};
+const PANELS={Colors:panelColors,Effects:panelEffects,Text:panelText,Elements:panelElements,Moods:panelMoods,Faces:panelFaces,JSON:panelJson,Layout:panelLayout,Awards:panelAwards,Cracking:panelCracking,Radar:panelRadar,Map:panelMap,Settings:panelSettings};
 function panel(){const p=$('panel');p.innerHTML='';p.append(PANELS[tab]());
- const t=$('tabs');t.innerHTML='';for(const n of TABS)t.append(E('button',{class:n===tab?'on':'',onclick:async()=>{tab=n;pickKey=null;$('pick').innerHTML='';$('pick').className='';pvMood=n==='Moods'?mood:null;if(n==='Elements'||n==='Moods'){try{info.entities=await(await fetch(base+'/api/entities')).json()}catch(e){}}if(n==='Layout')await loadLayout();if(n==='Awards')await loadAwards();if(n==='Cracking')await loadCracking();if(n==='Settings')await loadSettings();panel();overlay();schedule()}},n))}
+ const t=$('tabs');t.innerHTML='';for(const n of TABS)t.append(E('button',{class:n===tab?'on':'',onclick:async()=>{tab=n;pickKey=null;$('pick').innerHTML='';$('pick').className='';pvMood=n==='Moods'?mood:null;if(n==='Elements'||n==='Moods'){try{info.entities=await(await fetch(base+'/api/entities')).json()}catch(e){}}if(n==='Layout')await loadLayout();if(n==='Awards')await loadAwards();if(n==='Cracking')await loadCracking();if(n==='Radar')await loadRadar();if(n==='Map')await loadLocations();if(n==='Settings')await loadSettings();panel();overlay();schedule()}},n))}
 
 /* ---- drag text lines on the preview ---- */
 const est=t=>(t||'').replace(/\{time\}/g,'00:00:00').replace(/\{date\}/g,'0000-00-00').replace(/\{\w+\}/g,'0000').length;
@@ -4567,8 +4772,9 @@ function render(){const g=$('grid');g.innerHTML='';
   if(f)c.append(E('small',{},' +'+f));g.append(c)}}
 function pick(){cur=normalize(clone(S.themes[sel]));delete cur.builtin;$('name').value=sel;pvMood=tab==='Moods'?mood:null;render();panel();overlay();schedule()}
 async function refresh(keep){S=await(await fetch(base+'/api/themes')).json();if(!S.themes[sel])sel=S.active;
- try{info.elements=await(await fetch(base+'/api/elements')).json();info.entities=await(await fetch(base+'/api/entities')).json();info.packs=await(await fetch(base+'/api/packs')).json()}catch(e){}
- if(keep){render()}else pick()}
+ if(keep){render()}else pick();
+ try{const[el,en,pk]=await Promise.all([fetch(base+'/api/elements'),fetch(base+'/api/entities'),fetch(base+'/api/packs')]);
+  info.elements=await el.json();info.entities=await en.json();info.packs=await pk.json()}catch(e){}}
 const nameOk=n=>/^[A-Za-z0-9_\- ]{1,32}$/.test(n);
 async function saveAs(n){const r=await(await post('save',{name:n,theme:prune(clone(cur))})).json();if(!r.ok)say(r.error);return r.ok}
 $('save').onclick=async()=>{const n=$('name').value.trim();

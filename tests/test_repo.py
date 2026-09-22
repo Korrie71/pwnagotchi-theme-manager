@@ -58,6 +58,9 @@ problems = []
 for f in text_files:
     body = read(f)
     for m in re.finditer(r"[\w.+-]+@[\w-]+\.[\w.-]+", body):
+        domain = m.group(0).split("@", 1)[1]
+        if re.fullmatch(r"[\d.]+", domain):   # a package-version pin in a CDN URL (e.g. leaflet@1.9.4), not an email
+            continue
         if "noreply" not in m.group(0) and not m.group(0).endswith(("@example.com", "@users.noreply.github.com")):
             problems.append((f, "email", m.group(0)))
     for m in re.finditer(r"\b(?:[0-9a-fA-F]{2}:){5}[0-9a-fA-F]{2}\b", body):

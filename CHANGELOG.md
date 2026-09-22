@@ -1,5 +1,23 @@
 # Changelog
 
+## 2.12.0
+
+**Radar is back, redesigned.** Instead of the old ranked list, it is now a sonar-style sweep: a rotating line with a
+fading trail sweeps a circular display, and each nearby network shows up as a blip. Distance from the centre reflects
+signal strength; each device gets a stable bearing (derived from its MAC, since there is no real direction data) so
+it never jumps between scans. Tap a blip for its name, encryption, client count and signal, and whether you already
+have a handshake for it (shown dimmed). Same as before: purely a display, it never influences what pwnagotchi
+actually attacks.
+
+**GPS map.** The web editor's Cracking dashboard gains a "Map" tab: an OpenStreetMap view (via Leaflet, loaded only
+when you open the tab) pinning every handshake that has a saved location. If the map tiles cannot load, it falls back
+to a plain list with a per-row link to open that spot on OpenStreetMap, so a flaky connection never breaks the tab.
+This does not replace `webgpsmap` (which maps every access point it sees); it is scoped to your own captures.
+
+**Fixed:** after restoring a backup or saving a theme, the web editor's grid could wait on unrelated data (the
+elements and entities lists used by other tabs) before repainting, which occasionally made a just-restored theme feel
+slow to appear. It now repaints the grid as soon as the theme list itself is back, and fetches the rest alongside it.
+
 ## 2.11.2
 
 Fixed: if something else briefly takes over the physical display (tested against a compatible tool that hands the

@@ -82,9 +82,24 @@ crack_rows = [
 crack_info = {"__summary__": {"kind": "summary", "text": T._crack_summary_text(T.crack_summary(crack_rows))}}
 crack_info.update({r["file"]: dict(r, kind="row") for r in crack_rows})
 menu.update(crack=["__summary__"] + [r["file"] for r in crack_rows], crack_info=crack_info)
+# a sonar radar with made-up nearby networks (fake, locally-administered MACs, never real ones)
+radar_aps = [
+    ("02:00:00:00:00:01", "CoffeeShop", 6, -45, 1, "WPA2", False),
+    ("02:00:00:00:00:02", "GuestWifi", 11, -58, 0, "WPA2", False),
+    ("02:00:00:00:00:03", "OldRouter", 1, -80, 0, "WPA2", True),
+    ("02:00:00:00:00:04", "Office5G", 44, -66, 3, "WPA3", False),
+    ("02:00:00:00:00:05", "(hidden)", 6, -72, 0, "WPA2", False),
+]
+radar_rows = [{"mac": mac, "name": name, "channel": ch, "rssi": rssi, "clients": clients, "encryption": enc,
+               "captured": captured, "angle": T._radar_angle(mac.replace(":", "")),
+               "score": T._radar_score({"mac": mac, "rssi": rssi, "clients": [None] * clients, "encryption": enc}, {mac.replace(":", "")} if captured else set())}
+              for mac, name, ch, rssi, clients, enc, captured in radar_aps]
+radar_rows.sort(key=lambda r: -r["score"])
+menu.update(radar=radar_rows, t=3.0)
 for name, extra in (("menu-themes.png", {"tab": "themes", "page": 1}), ("menu-plugins.png", {"tab": "plugins", "busy": {"bt-tether"}}),
                     ("menu-system.png", {"tab": "system", "overheat": True, "atkmode": "home"}), ("menu-awards.png", {"tab": "awards"}),
                     ("menu-layout.png", {"tab": "layout", "page": 1}), ("menu-crack.png", {"tab": "crack"}),
+                    ("menu-radar.png", {"tab": "radar"}),
                     ("menu-adjust.png", {"mode": "adjust", "adjust": "face", "offset": (12, 6), "box": (25, 52, 252, 122), "step_px": 5})):
     shown = dict(menu, **extra)
     shown["tab_scroll"] = T.TAB_NAMES.index(shown["tab"]) if shown["tab"] in T.TAB_NAMES else 0

@@ -240,6 +240,20 @@ with sync_playwright() as p:
     check("the Cracking tab shows the summary cards", page.locator(".statcard").count() == 7)
     check("...and matches the API's counts", page.locator(".statcard div").first.inner_text() == str(cracking0["summary"]["cracked"]))
 
+    tab("Radar")
+    page.wait_for_selector("canvas")
+    check("the Radar tab draws a sonar canvas", page.locator("canvas").count() == 1)
+    page.wait_for_timeout(200)
+    shot1 = page.locator("canvas").screenshot()
+    page.wait_for_timeout(600)
+    shot2 = page.locator("canvas").screenshot()
+    check("the sonar sweep actually animates", shot1 != shot2)
+
+    tab("Map")
+    page.wait_for_timeout(300)
+    check("the Map tab loads with no browser error (empty or listing locations)",
+          page.locator("p:has-text('located so far')").count() == 1)
+
     settings0 = requests.get(URL + "api/settings").json()
     tab("Settings")
     page.wait_for_selector("#setsave")
