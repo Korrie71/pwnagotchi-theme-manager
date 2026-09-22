@@ -324,6 +324,12 @@ rejected it) or `?` (wpa-sec isn't tracking it). Nothing here changes what gets 
 sqlite database and potfile the `wpa-sec` plugin already keeps. The web editor has the same information in its
 Cracking tab. `theme_manager.py cracking` prints the summary as JSON, `cracking list` prints every row.
 
+Each handshake also gets a **quality** guess, worked out locally from the capture itself instead of waiting for
+wpa-sec: a full handshake, a PMKID (crackable without a client ever connecting), only a partial capture, or empty
+(likely junk, e.g. a deauth that never got a reply). It's a best-effort look at the raw bytes, not a full parser, so
+an unusual network can occasionally fool it. Tapping a row that hasn't been cracked yet mentions it; the web editor
+shows it next to each row, and counts junk captures in its own stat card. `cracking list` prints it as a second column.
+
 **Swipe:** on the bare screen (no menu open), swipe sideways to change theme: left goes to the next theme, right to the
 previous one, and the new theme's name shows for a moment. It needs the calibration, and only clearly sideways swipes
 count, so taps, vertical swipes and slow drags are ignored.

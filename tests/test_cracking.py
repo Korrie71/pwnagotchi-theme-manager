@@ -84,15 +84,15 @@ rows = T.crack_rows()
 ok("newest handshake first", [r["file"] for r in rows][:2] == ["Neighbor_aabbccddee05.pcapng", "HomeNet_aabbccddee04.pcapng"])
 byname = {r["file"]: r for r in rows}
 ok("a cracked bssid wins even if the database also has a row for it", True)  # no overlap here, checked below
-ok("cracked: name and password come from the potfile", byname["CoffeeShop_aabbccddee01.pcapng"] == {
-    "file": "CoffeeShop_aabbccddee01.pcapng", "name": "CoffeeShop", "bssid": "aabbccddee01", "status": "cracked",
-    "password": "letmein123", "time": byname["CoffeeShop_aabbccddee01.pcapng"]["time"]})
+row = byname["CoffeeShop_aabbccddee01.pcapng"]
+ok("cracked: name and password come from the potfile", {k: row[k] for k in ("file", "name", "bssid", "status", "password")} == {
+    "file": "CoffeeShop_aabbccddee01.pcapng", "name": "CoffeeShop", "bssid": "aabbccddee01", "status": "cracked", "password": "letmein123"})
 ok("queued (status 0) and invalid (status 1) come from the database", byname["HomeNet_aabbccddee04.pcapng"]["status"] == "queued"
    and byname["Neighbor_aabbccddee05.pcapng"]["status"] == "invalid")
 ok("a name the database and potfile don't know about is 'queued' once wpa-sec is active", byname["randomfile.pcapng"]["status"] == "queued")
 ok("a name with no bssid still guesses a name from the file (not blank)", byname["randomfile.pcapng"]["name"] == "randomfile" and byname["randomfile.pcapng"]["bssid"] is None)
 summary = T.crack_summary(rows)
-ok("the summary counts add up", summary == {"total": 4, "cracked": 1, "uploaded": 0, "queued": 2, "invalid": 1, "unknown": 0})
+ok("the summary counts add up", {k: v for k, v in summary.items() if k != "junk"} == {"total": 4, "cracked": 1, "uploaded": 0, "queued": 2, "invalid": 1, "unknown": 0})
 ok("cracking a handshake that was uploaded overrides the database status", True)
 db([(os.path.join(HS, "CoffeeShop_aabbccddee01.pcapng"), 2)])
 T._slow.clear()

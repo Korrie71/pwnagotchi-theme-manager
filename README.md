@@ -36,7 +36,7 @@ with pwnagotchi's mood. Themes are small JSON files you can edit in a web editor
 - **Web editor** with live preview: sliders, gradient picker, drag-to-place text, click a part of the preview to recolor it, import/export
 - **Touch menu:** double tap the screen to switch themes (or just swipe sideways), enable/disable pwnagotchi plugins on the fly, or see system status and restart/reboot/shut down
 - **Radar:** the networks pwnagotchi currently sees, ranked by signal and client count (display only, never touches attacks)
-- **Cracking dashboard:** every captured handshake with its upload/crack status (from the `wpa-sec` plugin), on the screen and in the editor
+- **Cracking dashboard:** every captured handshake with its upload/crack status and a local handshake-quality guess (full/PMKID/partial/junk), on the screen and in the editor
 - **Move anything on the screen:** tap an element in the touch menu and nudge it with small `+` and `-` buttons (or do it in the web editor)
 - **Achievements:** unlock them for handshakes, uptime, themes tried and more, on the screen and in the editor
 - **Overheating auto-off (optional):** a countdown on the screen, then the Pi shuts itself down; a touch cancels it

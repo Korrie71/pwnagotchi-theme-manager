@@ -1,5 +1,12 @@
 # Changelog
 
+## 2.8.0
+
+**Handshake quality.** Each capture in the Cracking dashboard now also gets a local quality guess, without waiting
+for wpa-sec: a full handshake, a PMKID (crackable without a client), a partial capture, or empty (likely junk). It's
+a best-effort look at the raw EAPOL bytes, not a full parser. Shown when you tap a row, in the web editor, and as a
+new "Junk" count in the summary. `cracking list` prints it as a second column.
+
 ## 2.7.1
 
 Fixed a JS syntax error (a double-escaped apostrophe in the Cracking tab's text) that broke the entire web editor,

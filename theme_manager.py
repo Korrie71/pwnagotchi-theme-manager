@@ -599,6 +599,8 @@ BSSID_HEX = re.compile(r"[0-9a-fA-F]{12}")
 HANDSHAKE_RE = re.compile(r"^(.*)_([0-9a-fA-F]{12})\.(?:pcap|pcapng)$")
 CRACK_PILL = {"cracked": ("PWND", True), "uploaded": ("WAIT", False), "queued": ("NEW", False),
               "invalid": ("BAD", False), "unknown": ("?", False)}
+QUALITY_NOTE = {"handshake": " (looks like a full handshake)", "pmkid": " (has a PMKID, crackable without a client)",
+                "partial": " (only a partial capture, may not crack)", "empty": " (no EAPOL data seen, likely junk)"}
 
 
 def _wpa_db_status():
@@ -639,6 +641,57 @@ def _wpa_potfile():
     return out
 
 
+EAPOL_SIG = re.compile(rb"\x88\x8e[\x01\x02]\x03")   # EtherType 0x888e, EAPOL version 1 or 2, type 3 (EAPOL-Key)
+PMKID_KDE = b"\xdd\x14\x00\x0f\xac\x04"               # a vendor KDE carrying a PMKID (OUI 00:0f:ac, type 4)
+_quality_cache = {}
+
+
+def _handshake_quality(path):
+    """A best-effort guess at whether a capture is actually crackable, without waiting on wpa-sec: "handshake" (both
+    halves of the 4-way exchange are there), "pmkid" (no full handshake, but the AP's first reply carries a PMKID,
+    crackable without a client), "partial" (some EAPOL traffic but not enough) or "empty" (none at all, junk capture).
+
+    This is not a real 802.11/EAPOL parser: it looks for the EAPOL-Key byte signature anywhere in the file and reads
+    the few fields right after it. That is enough to tell messages 1-4 apart and spot a PMKID in the ordinary case,
+    but an unusual AKM or a coincidental byte sequence elsewhere in the capture could fool it."""
+    try:
+        st = os.stat(path)
+        key = (path, st.st_mtime, st.st_size)
+    except OSError:
+        return "unknown"
+    hit = _quality_cache.get(path)
+    if hit and hit[0] == key:
+        return hit[1]
+    try:
+        data = open(path, "rb").read()
+    except OSError:
+        return "unknown"
+    seen = set()
+    pmkid = False
+    for m in EAPOL_SIG.finditer(data):
+        idx = m.start()
+        if idx + 101 > len(data):
+            continue
+        key_info = int.from_bytes(data[idx + 7:idx + 9], "big")
+        ack, mic, secure = bool(key_info & 0x80), bool(key_info & 0x100), bool(key_info & 0x200)
+        if ack and not mic:
+            seen.add("M1")
+            kdl = int.from_bytes(data[idx + 99:idx + 101], "big")
+            if kdl and PMKID_KDE in data[idx + 101:idx + 101 + min(kdl, 64)]:
+                pmkid = True
+        elif mic and not ack and not secure:
+            seen.add("M2")
+        elif ack and mic and secure:
+            seen.add("M3")
+        elif mic and not ack and secure:
+            seen.add("M4")
+    quality = "handshake" if {"M1", "M2"} <= seen else "pmkid" if pmkid else "partial" if seen else "empty"
+    _quality_cache[path] = (key, quality)
+    if len(_quality_cache) > 2000:      # bound it: a stale entry for a deleted file is harmless, just wasted memory
+        _quality_cache.pop(next(iter(_quality_cache)))
+    return quality
+
+
 def _crack_rows_impl(limit):
     d = _handshake_dir()
     try:
@@ -653,17 +706,19 @@ def _crack_rows_impl(limit):
     db_base = {os.path.basename(k): v for k, v in db_status.items()} if have_db else {}
     rows = []
     for name, mtime in entries[:limit]:
+        path = os.path.join(d, name)
+        quality = _handshake_quality(path)
         m = HANDSHAKE_RE.match(name)
         essid, bssid = (m.group(1), m.group(2).lower()) if m else (os.path.splitext(name)[0], None)
         if bssid and bssid in pot:
             pot_essid, password = pot[bssid]
             rows.append({"file": name, "name": pot_essid or essid or "(hidden)", "bssid": bssid,
-                         "status": "cracked", "password": password, "time": mtime})
+                         "status": "cracked", "password": password, "time": mtime, "quality": quality})
             continue
         code = db_base.get(name)
         status = CRACK_STATUS.get(code, "queued") if code is not None else ("queued" if have_db else "unknown")
         rows.append({"file": name, "name": essid or "(hidden)", "bssid": bssid, "status": status,
-                     "password": None, "time": mtime})
+                     "password": None, "time": mtime, "quality": quality})
     return rows
 
 
@@ -675,20 +730,23 @@ def crack_rows(limit=300):
 def crack_summary(rows=None):
     """{"total", "cracked", "uploaded", "queued", "invalid", "unknown"} counted from crack_rows()."""
     rows = crack_rows() if rows is None else rows
-    out = {"total": len(rows), "cracked": 0, "uploaded": 0, "queued": 0, "invalid": 0, "unknown": 0}
+    out = {"total": len(rows), "cracked": 0, "uploaded": 0, "queued": 0, "invalid": 0, "unknown": 0, "junk": 0}
     for r in rows:
         out[r["status"]] = out.get(r["status"], 0) + 1
+        if r.get("quality") == "empty":
+            out["junk"] += 1
     return out
 
 
 def _crack_summary_text(summary):
     if summary["total"] == 0:
         return "no handshakes yet"
+    junk = " (%d look like junk)" % summary["junk"] if summary.get("junk") else ""
     if summary["unknown"]:
-        return "%d cracked of %d  \u00b7  wpa-sec plugin not active" % (summary["cracked"], summary["total"])
+        return "%d cracked of %d  \u00b7  wpa-sec plugin not active%s" % (summary["cracked"], summary["total"], junk)
     if summary["queued"] or summary["uploaded"] or summary["invalid"]:
-        return "%d cracked of %d  \u00b7  %d queued  %d invalid" % (summary["cracked"], summary["total"], summary["queued"], summary["invalid"])
-    return "%d cracked of %d handshakes" % (summary["cracked"], summary["total"])
+        return "%d cracked of %d  \u00b7  %d queued  %d invalid%s" % (summary["cracked"], summary["total"], summary["queued"], summary["invalid"], junk)
+    return "%d cracked of %d handshakes%s" % (summary["cracked"], summary["total"], junk)
 
 
 # ---------------------------------------------------------------- radar (display-only ranking, never touches attacks)
@@ -2376,7 +2434,7 @@ def draw_notice(img, text, theme):
 
 class ThemeManager(plugins.Plugin):
     __author__ = "theme_manager contributors"
-    __version__ = "2.7.1"
+    __version__ = "2.8.0"
     __license__ = "GPL3"
     __description__ = "Theme engine for the 3.5 inch display: colors, effects, animations, custom text, web GUI."
 
@@ -3246,10 +3304,13 @@ class ThemeManager(plugins.Plugin):
                 elif act == "crackrow":
                     info = menu["crack_info"].get(arg)
                     if info and info["kind"] == "row":
-                        msgs = {"cracked": "%s: %s" % (info["name"], info["password"]), "invalid": "invalid capture",
-                                "uploaded": "uploaded, not cracked yet", "queued": "waiting to upload",
-                                "unknown": "status unknown (wpa-sec plugin not active)"}
-                        self.toast(msgs.get(info["status"], "?"), seconds=4, now=now)
+                        if info["status"] == "cracked":
+                            msg = "%s: %s" % (info["name"], info["password"])
+                        else:
+                            msgs = {"invalid": "invalid capture", "uploaded": "uploaded, not cracked yet",
+                                    "queued": "waiting to upload", "unknown": "status unknown (wpa-sec plugin not active)"}
+                            msg = msgs.get(info["status"], "?") + QUALITY_NOTE.get(info.get("quality"), "")
+                        self.toast(msg, seconds=4, now=now)
                         self._refresh_now()
                     return
                 elif act == "radrow":
@@ -4265,14 +4326,15 @@ function panelCracking(){const p=E('div'),s=crack.summary;
  p.append(E('p',{style:'color:var(--dim);margin:0 0 10px'},crack.wpa_sec?'From the wpa-sec plugin\'s own upload/crack tracking. Read-only: nothing here changes what gets attacked.':
   'The wpa-sec plugin is not tracking uploads, so only what has actually been cracked is known. Handshakes otherwise show as \'unknown\'.'));
  p.append(E('div',{class:'wpa-stats',style:'display:grid;grid-template-columns:repeat(auto-fit,minmax(90px,1fr));gap:8px;margin-bottom:12px'},
-  [['cracked','Cracked'],['queued','Queued'],['uploaded','Uploaded'],['invalid','Invalid'],['total','Total']].map(([k,l])=>
+  [['cracked','Cracked'],['queued','Queued'],['uploaded','Uploaded'],['invalid','Invalid'],['junk','Junk'],['total','Total']].map(([k,l])=>
    E('div',{class:'statcard',style:'text-align:center;cursor:default;background:var(--panel);border:1px solid var(--line);border-radius:8px;padding:8px'},E('div',{style:'font-size:22px'},String(s[k])),E('small',{style:'color:var(--dim)'},l)))));
  if(!crack.rows.length){p.append(E('p',{style:'color:var(--dim)'},'No handshakes yet.'));return p}
  const PILL={cracked:['PWND',1],uploaded:['WAIT',0],queued:['NEW',0],invalid:['BAD',0],unknown:['?',0]};
+ const QUAL={handshake:'full handshake',pmkid:'PMKID',partial:'partial',empty:'junk'};
  for(const r of crack.rows){const[label,done]=PILL[r.status]||['?',0];
   p.append(E('div',{class:'erow set',style:done?'border-color:var(--acc)':''},
    E('span',{class:'ename',style:'width:170px'},r.name||'(hidden)'),
-   E('span',{class:'inh',style:'flex:1'},r.status==='cracked'?r.password:(r.bssid||'')),
+   E('span',{class:'inh',style:'flex:1'},(r.status==='cracked'?r.password:(r.bssid||''))+'  · '+(QUAL[r.quality]||r.quality)),
    E('span',{style:'padding:2px 10px;border-radius:10px;font-size:11px;background:'+(done?'var(--acc)':'transparent')+';border:1px solid var(--acc);color:'+(done?'var(--bg)':'var(--text)')},label)))}
  return p}
 let radar={rows:[],age:null};
@@ -4466,7 +4528,7 @@ if __name__ == "__main__":
     elif cmd == "cracking" and len(a) == 2 and a[1] == "list":
         for r in crack_rows():
             extra = ": %s" % r["password"] if r["status"] == "cracked" else ""
-            print("%-8s %-24s %s%s" % (r["status"], r["name"] or "(hidden)", r["bssid"] or "?", extra))
+            print("%-8s %-9s %-24s %s%s" % (r["status"], r["quality"], r["name"] or "(hidden)", r["bssid"] or "?", extra))
     elif cmd == "validate" and len(a) == 2:
         try:
             t = _clean(json.load(open(a[1])))

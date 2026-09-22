@@ -236,8 +236,8 @@ with sync_playwright() as p:
 
     cracking0 = requests.get(URL + "api/cracking").json()
     tab("Cracking")
-    page.wait_for_selector(".card")
-    check("the Cracking tab shows the summary cards", page.locator(".statcard").count() == 5)
+    page.wait_for_selector(".statcard")
+    check("the Cracking tab shows the summary cards", page.locator(".statcard").count() == 6)
     check("...and matches the API's counts", page.locator(".statcard div").first.inner_text() == str(cracking0["summary"]["cracked"]))
 
     tab("Radar")
