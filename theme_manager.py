@@ -33,11 +33,14 @@ import shutil
 import socket
 import sqlite3
 import hashlib
+import ipaddress
 import struct
 import textwrap
 import threading
 import time
+import urllib.request
 import zipfile
+from concurrent.futures import ThreadPoolExecutor
 
 import numpy as np
 from PIL import Image, ImageChops, ImageDraw, ImageFilter, ImageFont
@@ -72,6 +75,7 @@ def trim_memory():
 THEME_DIR = os.environ.get("THEME_MANAGER_DIR", "/etc/pwnagotchi/themes")   # the variable is for testing
 ACTIVE_FILE = os.path.join(THEME_DIR, "active.json")
 DOCS_FILE = os.path.join(THEME_DIR, "README.md")
+NODES_FILE = os.path.join(THEME_DIR, "nodes.json")
 FRAME_PATH = "/var/tmp/pwnagotchi/pwnagotchi.png"
 FONT_DIR = "/usr/share/fonts/truetype/dejavu/"
 
@@ -576,6 +580,84 @@ def _local_ip():
             if ip:
                 return ip
     return "no ip"
+
+
+# --------------------------------------------------------------------- node scanning (see "node_pwn.py")
+NODE_PORT = 8080
+NODE_TIMEOUT = 0.4
+NODE_SCAN_CAP = 512    # never scan more than this many addresses, however big the subnet looks
+
+
+def _iface_netmask(name):
+    with socket.socket(socket.AF_INET, socket.SOCK_DGRAM) as sk:
+        try:
+            return socket.inet_ntoa(fcntl.ioctl(sk.fileno(), 0x891B, struct.pack("256s", name[:15].encode()))[20:24])
+        except OSError:
+            return None
+
+
+def _node_scan_hosts():
+    """Every other address on the same subnet as our own default-route interface -- the pool a node scan checks."""
+    try:
+        for line in open("/proc/net/route").read().splitlines()[1:]:
+            f = line.split()
+            if f[1] != "00000000":
+                continue
+            name = f[0]
+            ip, mask = _iface_ip(name), _iface_netmask(name)
+            if ip and mask:
+                net = ipaddress.ip_network("%s/%s" % (ip, mask), strict=False)
+                return [str(h) for h in net.hosts() if str(h) != ip][:NODE_SCAN_CAP]
+    except OSError:
+        pass
+    return []
+
+
+def _probe_node(host, port=NODE_PORT, timeout=NODE_TIMEOUT):
+    """GET the node_pwn status API on one host. None if it is not reachable or not a node."""
+    h, p = host, port
+    if isinstance(host, str) and re.fullmatch(r"[^:]+:\d+", host):
+        h, p = host.rsplit(":", 1)
+        p = int(p)
+    try:
+        with urllib.request.urlopen("http://%s:%d/plugins/node_pwn/api/info" % (h, p), timeout=timeout) as r:
+            data = json.loads(r.read().decode("utf-8"))
+        if not isinstance(data, dict) or data.get("node") != "node_pwn" or not data.get("mac"):
+            return None
+        data["ip"] = host if isinstance(host, str) else h   # keep a :port if one was given, so a later re-probe uses it too
+        return data
+    except Exception:
+        return None
+
+
+def scan_for_nodes(hosts=None, port=NODE_PORT, timeout=NODE_TIMEOUT, workers=48):
+    """Probe a pool of hosts (every other address on our subnet, unless a specific pool is given) for node_pwn.
+    Concurrent, so a full /24 with nothing listening still takes about one timeout, not 254 of them."""
+    hosts = _node_scan_hosts() if hosts is None else list(hosts)
+    if not hosts:
+        return []
+    found = []
+    with ThreadPoolExecutor(max_workers=max(1, min(workers, len(hosts)))) as ex:
+        for result in ex.map(lambda h: _probe_node(h, port, timeout), hosts):
+            if result:
+                found.append(result)
+    return found
+
+
+def _load_nodes():
+    try:
+        with open(NODES_FILE) as fp:
+            data = json.load(fp)
+        if isinstance(data, dict) and isinstance(data.get("paired"), dict):
+            return data["paired"]
+    except (OSError, ValueError, KeyError, TypeError):
+        pass
+    return {}
+
+
+def _save_nodes(paired):
+    os.makedirs(THEME_DIR, exist_ok=True)
+    write_json(NODES_FILE, {"paired": paired}, indent=2)
 
 
 def _handshake_dir():
@@ -2132,7 +2214,7 @@ CONFIRM_S = 4.0          # a power button must be tapped twice within this time
 GPS_TOKENS = ("gps", "lat", "lon", "sats")
 STATUS_LINES = ("CPU {temp}  load {cpu}  RAM {mem}", "IP {ip}", "GPS {gps}  {lat} {lon}",
                 "Up {uptime}  Power {power}  Bat {battery}", "Pwned {handshakes}  Cracked {cracked}  Session {session}")
-TAB_NAMES = ("themes", "plugins", "system", "awards", "layout", "crack", "radar")
+TAB_NAMES = ("themes", "plugins", "system", "awards", "layout", "crack", "radar", "nodes")
 TAB_WINDOW = 5      # tabs shown at once before it needs '<'/'>' to see the rest: as many as fit comfortably
 TAB_ARROW_W = 36
 PROTECTED_PLUGINS = ('theme_manager',)   # never listed: switching it off would remove the menu itself
@@ -2213,7 +2295,7 @@ def to_screen(m, x, y):
 def menu_items(menu):
     tab = menu.get("tab", "themes")
     return {"themes": menu["names"], "awards": menu["awards"], "layout": menu["layout"],
-            "crack": menu["crack"]}.get(tab, menu["plugins"])
+            "crack": menu["crack"], "nodes": menu["nodes"]}.get(tab, menu["plugins"])
 
 
 def adjust_popup(menu):
@@ -2268,11 +2350,13 @@ def menu_hits(menu):
             x, y = radar_pos(r["angle"], radar_radius_frac(r["rssi"]))
             hits.append(((x - 15, y - 15, x + 15, y + 15), ("radarblip", r["mac"])))
         return hits + common
-    act = {"themes": "pick", "awards": "award", "layout": "adjust", "crack": "crackrow"}.get(tab, "toggle")
+    act = {"themes": "pick", "awards": "award", "layout": "adjust", "crack": "crackrow", "nodes": "noderow"}.get(tab, "toggle")
     hits = [((28, 44 + i * 44, 452, 44 + i * 44 + 40), (act, n))
             for i, n in enumerate(menu_items(menu)[page * MENU_ROWS:(page + 1) * MENU_ROWS])]
     if tab == "layout":
         hits.append(((326, 268, 374, 308), ("resetall", None)))
+    elif tab == "nodes":
+        hits.append(((326, 268, 374, 308), ("scan", None)))
     return hits + [((28, 268, 118, 308), ("prev", None)), ((124, 268, 214, 308), ("next", None))] + common
 
 
@@ -2347,6 +2431,9 @@ def draw_menu(img, menu, theme):
         d.text((240, 178), "(Settings in the web editor, or settings.json)", font=_font(12), fill=_mixc(fg, bg, 0.4), anchor="mm")
     if tab == "layout" and not menu["layout"]:
         d.text((240, 150), "Nothing on the screen yet", font=_font(16, True), fill=fg, anchor="mm")
+    if tab == "nodes" and len(menu.get("nodes", [])) <= 1:
+        d.text((240, 150), "No nodes yet", font=_font(16, True), fill=fg, anchor="mm")
+        d.text((240, 178), "Install node_pwn on another unit, then tap scan", font=_font(12), fill=_mixc(fg, bg, 0.4), anchor="mm")
     if tab == "system":
         for i, text in enumerate(menu.get("lines", ())):
             d.text((32, 46 + i * 24), text, font=_font(16), fill=fg)
@@ -2436,6 +2523,26 @@ def draw_menu(img, menu, theme):
             ask = bool(menu.get("confirm")) and menu["confirm"][0] == "resetall"
             d.rectangle(rect, fill=acc if ask else line, outline=acc, width=1)
             d.text(((x0 + x1) // 2, (y0 + y1) // 2), "sure?" if ask else "clear", font=_font(14, True), fill=bg if ask else fg, anchor="mm")
+        elif act == "noderow":
+            info = menu["nodes_info"][arg]
+            if info["kind"] == "summary":
+                d.text((x0 + 6, (y0 + y1) // 2), info["text"], font=_font(14, True), fill=fg, anchor="lm")
+            else:
+                paired, online = info["kind"] == "paired", info.get("online", True)
+                dim = paired and not online
+                name = info["name"] if len(info["name"]) <= 18 else info["name"][:17] + "…"
+                cy = (y0 + y1) // 2
+                d.rectangle(rect, fill=line, outline=acc if paired else line, width=2)
+                d.ellipse((x0 + 10, cy - 5, x0 + 20, cy + 5), fill=acc if online else _mixc(fg, bg, 0.5))
+                d.text((x0 + 28, cy), name, font=_font(18, paired), fill=_mixc(fg, bg, 0.45) if dim else fg, anchor="lm")
+                px0, px1 = x1 - 96, x1 - 10
+                label = ("%d shake%s" % (info["handshakes"], "" if info["handshakes"] == 1 else "s")) if paired else "pair"
+                d.rounded_rectangle((px0, y0 + 7, px1, y1 - 7), 10, fill=panel if paired else acc, outline=acc, width=2)
+                d.text(((px0 + px1) // 2, cy), label, font=_font(13, True), fill=fg if paired else bg, anchor="mm")
+        elif act == "scan":
+            d.rectangle(rect, fill=acc if menu.get("nodes_scanning") else line, outline=acc, width=1)
+            d.text(((x0 + x1) // 2, (y0 + y1) // 2), "scanning…" if menu.get("nodes_scanning") else "scan",
+                   font=_font(14, True), fill=bg if menu.get("nodes_scanning") else fg, anchor="mm")
         elif act == "toggle":
             busy, on, bad = arg in menu["busy"], arg in menu["on"], arg in menu.get("failed", ())
             d.rectangle(rect, fill=line, outline=acc if on else line, width=2)
@@ -2691,7 +2798,7 @@ def _pwa_icon(size, theme):
 
 class ThemeManager(plugins.Plugin):
     __author__ = "theme_manager contributors"
-    __version__ = "2.13.0"
+    __version__ = "2.14.0"
     __license__ = "GPL3"
     __description__ = "Theme engine for the 3.5 inch display: colors, effects, animations, custom text, web GUI."
 
@@ -2717,6 +2824,9 @@ class ThemeManager(plugins.Plugin):
         self._radar = []
         self._radar_at = 0
         self._radar_lock = threading.Lock()
+        self._nodes_found = []
+        self._nodes_paired = _load_nodes()
+        self._nodes_lock = threading.Lock()
         self._ach = clean_achievements(None)
         self._ach_lock = threading.Lock()
         self._ach_dirty = False
@@ -3130,7 +3240,7 @@ class ThemeManager(plugins.Plugin):
             self._menu = {"mode": mode, "tab": tab, "page": 0, "tab_scroll": TAB_NAMES.index(tab),
                           "pages": {t: 0 for t in TAB_NAMES}, "confirm": None, "awards_on": self._settings["achievements"],
                           "awards": [a[0] for a in ACHIEVEMENTS] if self._settings["achievements"] else [], "layout": [], "layout_info": {},
-                          "crack": [], "crack_info": {}, "radar": [],
+                          "crack": [], "crack_info": {}, "radar": [], "nodes": [], "nodes_info": {}, "nodes_scanning": False,
                           "award_info": {r["id"]: r for r in self.award_rows()}, "plugins": self._plugin_names(),
                           "on": set(plugins.loaded), "busy": set(), "failed": set(), "step": 0, "raw": [], "names": list(themes),
                           "colors": {n: t for n, t in themes.items()}, "active": self._active,
@@ -3138,12 +3248,27 @@ class ThemeManager(plugins.Plugin):
         self._sync_layout_menu(self._menu)
         self._sync_crack_menu(self._menu)
         self._sync_radar_menu(self._menu)
+        self._sync_nodes_menu(self._menu)
         self._wake.set()
         self._refresh_now()
 
     def _sync_radar_menu(self, menu):
         rows, _ = self.radar_rows()
         menu["radar"] = rows
+
+    def _sync_nodes_menu(self, menu):
+        paired, found = self.node_rows()
+        online = sum(1 for p in paired if p.get("online", True))
+        info = {"__summary__": {"kind": "summary", "text": "%d paired (%d online) · %d found" % (len(paired), online, len(found))}}
+        order = ["__summary__"]
+        for p in paired:
+            info["p:" + p["mac"]] = dict(p, kind="paired")
+            order.append("p:" + p["mac"])
+        for f in found:
+            info["f:" + f["mac"]] = dict(f, kind="found")
+            order.append("f:" + f["mac"])
+        menu["nodes"] = order
+        menu["nodes_info"] = info
 
     def _sync_crack_menu(self, menu):
         rows = crack_rows()
@@ -3383,9 +3508,11 @@ class ThemeManager(plugins.Plugin):
         self._home_defense_check(agent, access_points)
 
     def _update_radar(self, access_points):
-        """A snapshot for the sonar radar: display only, capped, sorted best first."""
+        """A snapshot for the sonar radar: display only, capped, sorted best first. A network already captured by
+        a paired, online node counts as captured here too -- the point of pairing at all: a group of units covering
+        more distinct ground instead of each re-attacking whatever a teammate already has."""
         try:
-            captured = {r["bssid"] for r in crack_rows() if r.get("bssid")}
+            captured = {r["bssid"] for r in crack_rows() if r.get("bssid")} | self.all_node_bssids()
             rows = []
             for ap in access_points:
                 mac = (ap.get("mac") or "").lower()
@@ -3408,6 +3535,71 @@ class ThemeManager(plugins.Plugin):
         with self._radar_lock:
             rows, at = list(self._radar), self._radar_at
         return rows, (time.time() - at if at else None)
+
+    # ---- nodes: other units running node_pwn on the same network, so a group does not attack the same handshake twice
+    def scan_nodes(self, hosts=None):
+        """A fresh subnet scan for node_pwn units (or, for testing, a specific pool of hosts). Can take a couple of
+        seconds -- call it off the touch/render thread."""
+        found = scan_for_nodes(hosts=hosts)
+        with self._nodes_lock:
+            self._nodes_found = found
+        return found
+
+    def pair_node(self, mac):
+        """Remember a node found by the last scan, keyed by its (stable) MAC rather than its (DHCP-assigned) IP."""
+        if not mac:
+            return False
+        with self._nodes_lock:
+            info = next((n for n in self._nodes_found if n.get("mac") == mac), None)
+            if not info:
+                return False
+            self._nodes_paired[mac] = dict(info, last_seen=time.time(), online=True)
+            paired = dict(self._nodes_paired)
+        _save_nodes(paired)
+        return True
+
+    def unpair_node(self, mac):
+        with self._nodes_lock:
+            existed = self._nodes_paired.pop(mac, None) is not None
+            paired = dict(self._nodes_paired)
+        if existed:
+            _save_nodes(paired)
+        return existed
+
+    def refresh_paired_nodes(self):
+        """Re-probe every paired node at its last-known address, updating stats or marking it offline."""
+        with self._nodes_lock:
+            targets = [(mac, info.get("ip")) for mac, info in self._nodes_paired.items()]
+        for mac, ip in targets:
+            info = _probe_node(ip) if ip else None
+            with self._nodes_lock:
+                if mac not in self._nodes_paired:
+                    continue
+                if info and info.get("mac") == mac:   # the address might now belong to a different device (DHCP)
+                    self._nodes_paired[mac].update(info, last_seen=time.time(), online=True)
+                else:
+                    self._nodes_paired[mac]["online"] = False
+        with self._nodes_lock:
+            paired = dict(self._nodes_paired)
+        _save_nodes(paired)
+
+    def node_rows(self):
+        """(paired nodes, freshly-found-but-not-yet-paired nodes)."""
+        with self._nodes_lock:
+            paired = [dict(info, mac=mac) for mac, info in self._nodes_paired.items()]
+            found = [n for n in self._nodes_found if n.get("mac") not in self._nodes_paired]
+        paired.sort(key=lambda n: (not n.get("online", True), n.get("name", "")))
+        return paired, found
+
+    def all_node_bssids(self):
+        """Bare BSSIDs any paired, currently-online node has already captured -- for marking a radar blip as
+        'a teammate already has this one', the same idea as this unit's own crack_rows() captured set."""
+        with self._nodes_lock:
+            out = set()
+            for info in self._nodes_paired.values():
+                if info.get("online", True):
+                    out.update(info.get("bssids") or ())
+            return out
 
     def _home_defense_check(self, agent, access_points):
         """Home Defense mode only: alert if a device we haven't seen before starts broadcasting one of your own
@@ -3591,7 +3783,7 @@ class ThemeManager(plugins.Plugin):
         for (x0, y0, x1, y1), (act, arg) in menu_hits(menu):
             if x0 <= x <= x1 and y0 <= y <= y1:
                 pages = max(1, -(-len(menu_items(menu)) // MENU_ROWS))
-                if act not in ("power", "mode", "resetall"):
+                if act not in ("power", "mode", "resetall", "noderow"):
                     menu["confirm"] = None
                 if act == "tab":
                     menu["pages"][menu["tab"]] = menu["page"]
@@ -3687,6 +3879,38 @@ class ThemeManager(plugins.Plugin):
                             msg += " (already have a handshake)"
                         self.toast(msg, seconds=4, now=now)
                         self._refresh_now()
+                    return
+                elif act == "noderow":
+                    info = menu["nodes_info"].get(arg)
+                    if not info or info["kind"] == "summary":
+                        pass
+                    elif info["kind"] == "found":
+                        menu["confirm"] = None
+                        if self.pair_node(info["mac"]):
+                            self.toast("paired with %s" % info["name"], seconds=3, now=now)
+                            self._sync_nodes_menu(menu)
+                        else:
+                            self.toast("could not pair (scan again?)", seconds=3, now=now)
+                        self._refresh_now()
+                    else:
+                        ask = menu.get("confirm")
+                        if ask and ask[0] == ("nodeunpair", info["mac"]) and now <= ask[1]:
+                            menu["confirm"] = None
+                            self.unpair_node(info["mac"])
+                            self._sync_nodes_menu(menu)
+                            self.toast("unpaired %s" % info["name"], seconds=3, now=now)
+                        else:
+                            menu["confirm"] = (("nodeunpair", info["mac"]), now + CONFIRM_S)
+                            msg = "%s: %s, %d handshake%s, %s -- tap again to unpair" % (
+                                info["name"], info["ip"], info["handshakes"], "" if info["handshakes"] == 1 else "s",
+                                "online" if info.get("online", True) else "offline")
+                            self.toast(msg, seconds=4, now=now)
+                        self._refresh_now()
+                    return
+                elif act == "scan":
+                    if not menu.get("nodes_scanning"):
+                        menu["nodes_scanning"] = True
+                        threading.Thread(target=self._scan_nodes_bg, args=(menu,), daemon=True, name="theme-nodescan").start()
                     return
                 elif act == "cal":
                     menu.update(mode="calib", step=0, raw=[])
@@ -3916,6 +4140,20 @@ class ThemeManager(plugins.Plugin):
             menu["on"] = set(plugins.loaded)
             menu["busy"].discard(name)
             menu["until"] = time.time() + MENU_TIMEOUT
+            self._refresh_now()
+
+    def _scan_nodes_bg(self, menu):
+        """A subnet scan for node_pwn units, off the touch thread because it can take a couple of seconds."""
+        self._refresh_now()
+        try:
+            self.scan_nodes()
+            self.refresh_paired_nodes()
+        except Exception as e:
+            logging.error("[theme_manager] node scan: %s", e)
+        finally:
+            menu["nodes_scanning"] = False
+            menu["until"] = time.time() + MENU_TIMEOUT
+            self._sync_nodes_menu(menu)
             self._refresh_now()
 
     def on_swipe(self, first, last, now):
@@ -4232,6 +4470,10 @@ class ThemeManager(plugins.Plugin):
             rows, age = self.radar_rows()
             return jsonify({"rows": rows, "age": age})
 
+        if path == "api/nodes" and request.method != "POST":
+            paired, found = self.node_rows()
+            return jsonify({"paired": paired, "found": found})
+
         if path == "api/locations":
             rows = [r for r in crack_rows() if r.get("loc")]
             return jsonify({"rows": [{"name": r["name"], "bssid": r["bssid"], "status": r["status"],
@@ -4356,6 +4598,19 @@ class ThemeManager(plugins.Plugin):
                     else:
                         self.set_offset(data.get("key"), data.get("dx", 0), data.get("dy", 0))
                     return jsonify({"ok": True, "rows": self.layout_rows()})
+                if path == "api/nodes/scan":
+                    self.scan_nodes()
+                    self.refresh_paired_nodes()
+                    paired, found = self.node_rows()
+                    return jsonify({"ok": True, "paired": paired, "found": found})
+                if path == "api/nodes/pair":
+                    ok_ = self.pair_node(str(data.get("mac", "")))
+                    paired, found = self.node_rows()
+                    return jsonify({"ok": ok_, "paired": paired, "found": found})
+                if path == "api/nodes/unpair":
+                    ok_ = self.unpair_node(str(data.get("mac", "")))
+                    paired, found = self.node_rows()
+                    return jsonify({"ok": ok_, "paired": paired, "found": found})
                 if path == "api/faces/delete":
                     return jsonify({"ok": delete_pack(data.get("pack", ""))})
                 if path == "api/try":
@@ -4497,7 +4752,7 @@ const KINDS=SCENE_KINDS_JS;
 const ANIM=['pulse','rainbow','glitch','rain','stars','noise'];
 const MOODS=['look_r','sleep','awake','bored','intense','cool','happy','grateful','excited','motivated','demotivated','smart','lonely','sad','angry','friend','broken','debug','upload','handshake'];
 const HOLDERS=['{name}','{time}','{date}','{cpu}','{temp}','{mem}','{uptime}','{ip}','{mode}','{gps}','{lat}','{lon}','{sats}','{handshakes}','{cracked}','{session}','{power}','{battery}'];
-const TABS=['Colors','Effects','Text','Elements','Moods','Faces','JSON','Layout','Awards','Cracking','Radar','Map','Settings'];
+const TABS=['Colors','Effects','Text','Elements','Moods','Faces','JSON','Layout','Awards','Cracking','Radar','Map','Nodes','Settings'];
 let S={active:'',themes:{}},sel='',cur={},info={elements:[],entities:[],packs:{}},tab='Colors',mood='sad',pvMood=null,busy=false,dirty=false,pvErr=false,timer=null;
 const say=t=>$('msg').textContent=t||'';
 /* After the plugin restarts (or the browser loses its session) the page's token is stale: fetch a fresh one and retry once. */
@@ -4781,6 +5036,26 @@ function panelMap(){const p=E('div'),count=locations.rows.length;
    E('span',{class:'inh',style:'flex:1'},r.status==='cracked'?r.password:r.status),
    E('a',{href:'https://www.openstreetmap.org/?mlat='+r.lat+'&mlon='+r.lon+'#map=17/'+r.lat+'/'+r.lon,target:'_blank',style:'font-size:11px;color:var(--acc)'},'open')))}
  return p}
+let nodes={paired:[],found:[]},nodesScanning=false;
+async function loadNodes(){try{nodes=await(await fetch(base+'/api/nodes')).json()}catch(e){}}
+function panelNodes(){const p=E('div');
+ p.append(E('p',{style:'color:var(--dim);margin:0 0 10px'},'Other units running node_pwn (install it with Node_PWN.sh) on the same network. Pair one to see its capture stats here; a paired node’s handshakes count as already covered on the Radar tab, so a group of units end up covering more ground instead of attacking the same network twice.'));
+ const btn=E('button',{onclick:async()=>{if(nodesScanning)return;nodesScanning=true;btn.textContent='scanning…';btn.disabled=true;
+  try{nodes=await(await post('nodes/scan',{})).json()}catch(e){}
+  finally{nodesScanning=false;panel()}}},'Scan for nodes');
+ p.append(btn);
+ if(!nodes.paired.length&&!nodes.found.length){p.append(E('p',{style:'color:var(--dim);margin-top:10px'},'No nodes yet. Make sure another unit has node_pwn installed and is on the same network, then scan.'));return p}
+ for(const n of nodes.paired){
+  p.append(E('div',{class:'erow'+(n.online?' set':''),style:n.online?'':'opacity:.55'},
+   E('span',{class:'ename',style:'width:170px'},(n.online?'● ':'○ ')+n.name),
+   E('span',{class:'inh',style:'flex:1'},n.ip+'  ·  '+n.handshakes+' handshake'+(n.handshakes===1?'':'s')+(n.online?'':'  (offline)')),
+   E('button',{onclick:async()=>{nodes=await(await post('nodes/unpair',{mac:n.mac})).json();panel()}},'Unpair')))}
+ for(const n of nodes.found){
+  p.append(E('div',{class:'erow set'},
+   E('span',{class:'ename',style:'width:170px'},n.name),
+   E('span',{class:'inh',style:'flex:1'},n.ip+'  ·  '+n.handshakes+' handshake'+(n.handshakes===1?'':'s')),
+   E('button',{onclick:async()=>{nodes=await(await post('nodes/pair',{mac:n.mac})).json();panel()}},'Pair')))}
+ return p}
 let cfg={settings:{},display:{dim:1,night:null,idle:null},limits:{}};
 async function loadSettings(){try{cfg=await(await fetch(base+'/api/settings')).json()}catch(e){}}
 async function saveSettings(){const j=await(await post('settings',{settings:cfg.settings,display:cfg.display})).json();
@@ -4806,9 +5081,9 @@ function panelSettings(){const p=E('div'),s=cfg.settings,d=cfg.display;
   idleOn?[field('after (minutes)',num(d.idle.minutes,v=>d.idle.minutes=v,1,240)),slider('dim to',[5,100,5],Math.round(d.idle.dim*100),v=>{d.idle.dim=v/100})]:null));
  p.append(E('div',{class:'row'},E('button',{id:'setsave',onclick:saveSettings},'Save settings')));
  return p}
-const PANELS={Colors:panelColors,Effects:panelEffects,Text:panelText,Elements:panelElements,Moods:panelMoods,Faces:panelFaces,JSON:panelJson,Layout:panelLayout,Awards:panelAwards,Cracking:panelCracking,Radar:panelRadar,Map:panelMap,Settings:panelSettings};
+const PANELS={Colors:panelColors,Effects:panelEffects,Text:panelText,Elements:panelElements,Moods:panelMoods,Faces:panelFaces,JSON:panelJson,Layout:panelLayout,Awards:panelAwards,Cracking:panelCracking,Radar:panelRadar,Map:panelMap,Nodes:panelNodes,Settings:panelSettings};
 function panel(){const p=$('panel');p.innerHTML='';p.append(PANELS[tab]());
- const t=$('tabs');t.innerHTML='';for(const n of TABS)t.append(E('button',{class:n===tab?'on':'',onclick:async()=>{tab=n;pickKey=null;$('pick').innerHTML='';$('pick').className='';pvMood=n==='Moods'?mood:null;if(n==='Elements'||n==='Moods'){try{info.entities=await(await fetch(base+'/api/entities')).json()}catch(e){}}if(n==='Layout')await loadLayout();if(n==='Awards')await loadAwards();if(n==='Cracking')await loadCracking();if(n==='Radar')await loadRadar();if(n==='Map')await loadLocations();if(n==='Settings')await loadSettings();panel();overlay();schedule()}},n))}
+ const t=$('tabs');t.innerHTML='';for(const n of TABS)t.append(E('button',{class:n===tab?'on':'',onclick:async()=>{tab=n;pickKey=null;$('pick').innerHTML='';$('pick').className='';pvMood=n==='Moods'?mood:null;if(n==='Elements'||n==='Moods'){try{info.entities=await(await fetch(base+'/api/entities')).json()}catch(e){}}if(n==='Layout')await loadLayout();if(n==='Awards')await loadAwards();if(n==='Cracking')await loadCracking();if(n==='Radar')await loadRadar();if(n==='Map')await loadLocations();if(n==='Nodes')await loadNodes();if(n==='Settings')await loadSettings();panel();overlay();schedule()}},n))}
 
 /* ---- drag text lines on the preview ---- */
 const est=t=>(t||'').replace(/\{time\}/g,'00:00:00').replace(/\{date\}/g,'0000-00-00').replace(/\{\w+\}/g,'0000').length;

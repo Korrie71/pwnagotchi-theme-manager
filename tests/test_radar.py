@@ -64,6 +64,18 @@ byname = {r["name"]: r for r in rows}
 ok("a network we already cracked is flagged", byname["HomeNet"]["captured"] is True and byname["OtherNet"]["captured"] is False)
 ok("...and ranks behind an equally good one we have not cracked", rows.index(byname["OtherNet"]) < rows.index(byname["HomeNet"]))
 
+# a network a paired, online node has already captured is flagged too -- the actual point of pairing
+tm._nodes_paired["02:00:00:00:00:aa"] = {"mac": "02:00:00:00:00:aa", "name": "teammate", "ip": "192.0.2.9:8080",
+                                          "handshakes": 1, "bssids": ["020000000006"], "online": True}
+tm.on_wifi_update(None, [ap("02:00:00:00:00:06", "OtherNet", 6, -40, 4, "WPA2")])
+rows, _ = tm.radar_rows()
+ok("a teammate's capture marks the network as covered on our own radar", next(r for r in rows if r["name"] == "OtherNet")["captured"] is True)
+tm._nodes_paired["02:00:00:00:00:aa"]["online"] = False
+tm.on_wifi_update(None, [ap("02:00:00:00:00:06", "OtherNet", 6, -40, 4, "WPA2")])
+rows, _ = tm.radar_rows()
+ok("...but not once that teammate goes offline (its bssids are stale)", next(r for r in rows if r["name"] == "OtherNet")["captured"] is False)
+del tm._nodes_paired["02:00:00:00:00:aa"]
+
 
 # ---------------------------------------------------------------- the touch menu (a sonar display)
 from PIL import Image  # noqa: E402
@@ -75,7 +87,7 @@ finger = Panel(tm2)
 finger.calibrate()
 tm2.on_wifi_update(None, [ap("02:00:00:00:00:01", "CoffeeShop", 6, -45, 1, "WPA2"),
                            ap("02:00:00:00:00:02", "GuestWifi", 11, -70, 0, "WPA2")])
-ok("seven tabs that fit and do not overlap", len(T.TAB_NAMES) == 7)
+ok("all tabs fit and do not overlap", len(T.TAB_NAMES) == 8)
 tm2.open_menu("list", "radar")
 ok("opening straight to the tab loads the current scan", len(tm2._menu["radar"]) == 2)
 hits = [h for h in T.menu_hits(tm2._menu) if h[1][0] == "radarblip"]

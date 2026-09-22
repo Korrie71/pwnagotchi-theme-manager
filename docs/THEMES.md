@@ -296,7 +296,7 @@ The first time, the menu asks for a quick **touch calibration**: tap the four `+
 controller reports raw numbers, so this teaches the plugin where your screen is. It only needs doing once and is saved in
 `/etc/pwnagotchi/themes/touch.json`. Use the `calibrate` button in the menu (or delete `touch.json`) to redo it.
 
-The menu has seven tabs. **Themes** switches theme. **Plugins** lists every installed plugin with an `ON`/`OFF` switch: tap a
+The menu has eight tabs. **Themes** switches theme. **Plugins** lists every installed plugin with an `ON`/`OFF` switch: tap a
 row to enable or disable that plugin right away, exactly like the switch on the web plugin page (the change is saved in
 `config.toml` and lasts after a reboot). While a plugin is switching the row shows `...`; enabling one can take a few
 seconds. `theme_manager` itself is never listed, so you can't switch off the menu from the menu. Pwnagotchi rewrites
@@ -335,8 +335,19 @@ captures. `theme_manager.py cracking` prints the summary as JSON, `cracking list
 network bettercap currently sees. Distance from the centre reflects signal strength (closer = stronger); each device
 gets a bearing derived from its MAC address, since there is no real direction data, so it stays in the same spot
 between scans instead of jumping around. Tap a blip for its name, encryption, client count, signal and whether you
-already have a handshake for it (shown dimmed and ranked lower). Like the Cracking tab, this is purely a display: it
-never changes what pwnagotchi decides to attack. The web editor's Radar tab shows the same sweep, redrawn live.
+already have a handshake for it (shown dimmed and ranked lower; this now also includes a paired node's captures, see
+below). Like the Cracking tab, this is purely a display: it never changes what pwnagotchi decides to attack. The web
+editor's Radar tab shows the same sweep, redrawn live.
+
+**Nodes** finds other units, on the same network, running the small `node_pwn.py` companion plugin (install it with
+`Node_PWN.sh`, the same way as this plugin's own `install.sh`). `scan` probes the local subnet for a few seconds; tap a found
+unit to pair with it, tap a paired one for its address and handshake count, tap it again within a few seconds to
+unpair. A paired node is remembered by its MAC address (so a new DHCP-assigned IP does not lose it) and, if it goes
+offline, is shown as offline rather than dropped or left showing stale numbers. Pairing is purely local to this unit;
+the node itself never initiates anything and never talks to any other node on its own. The one thing pairing
+actually changes: a network a paired, *online* node has already captured now also shows as covered on your own
+Radar, so a group of units end up covering more distinct ground instead of every unit attacking the same network.
+The web editor's Nodes tab does the same scanning and pairing.
 
 Each handshake also gets a **quality** guess, worked out locally from the capture itself instead of waiting for
 wpa-sec: a full handshake, a PMKID (crackable without a client ever connecting), only a partial capture, or empty

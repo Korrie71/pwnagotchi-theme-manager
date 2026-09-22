@@ -254,6 +254,30 @@ with sync_playwright() as p:
     check("the Map tab loads with no browser error (empty or listing locations)",
           page.locator("p:has-text('located so far')").count() == 1)
 
+    tab("Nodes")
+    page.wait_for_timeout(200)
+    check("the Nodes tab loads with no browser error (nothing found yet)", page.locator("p:has-text('No nodes yet')").count() == 1)
+    fake_node = {"node": "node_pwn", "version": "1.0.0", "name": "zz-e2e-node", "mac": "02:00:00:00:00:09",
+                 "ip": "192.0.2.50:8080", "handshakes": 4, "bssids": ["aabbccddeeff"], "uptime": 30}
+    page.route("**/api/nodes/scan", lambda r: r.fulfill(body=json.dumps({"ok": True, "paired": [], "found": [fake_node]}),
+                                                          content_type="application/json"))
+    page.click("button:text-is('Scan for nodes')")
+    page.wait_for_selector(".erow:has-text('zz-e2e-node')")
+    check("a found node shows up with a Pair button", page.locator(".erow:has-text('zz-e2e-node') button:text-is('Pair')").count() == 1)
+    page.unroute("**/api/nodes/scan")
+    page.route("**/api/nodes/pair", lambda r: r.fulfill(body=json.dumps({"ok": True, "paired": [dict(fake_node, online=True)], "found": []}),
+                                                          content_type="application/json"))
+    page.click(".erow:has-text('zz-e2e-node') button:text-is('Pair')")
+    page.wait_for_selector(".erow:has-text('Unpair')")
+    check("pairing moves it into the paired list with an Unpair button", page.locator(".erow:has-text('zz-e2e-node') button:text-is('Unpair')").count() == 1)
+    check("a paired, online node shows a filled dot and its handshake count", "4 handshake" in page.locator(".erow:has-text('zz-e2e-node')").inner_text())
+    page.unroute("**/api/nodes/pair")
+    page.route("**/api/nodes/unpair", lambda r: r.fulfill(body=json.dumps({"ok": True, "paired": [], "found": []}), content_type="application/json"))
+    page.click(".erow:has-text('zz-e2e-node') button:text-is('Unpair')")
+    page.wait_for_selector("p:has-text('No nodes yet')")
+    check("unpairing empties the list again", page.locator(".erow:has-text('zz-e2e-node')").count() == 0)
+    page.unroute("**/api/nodes/unpair")
+
     settings0 = requests.get(URL + "api/settings").json()
     tab("Settings")
     page.wait_for_selector("#setsave")

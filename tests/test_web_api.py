@@ -89,4 +89,22 @@ ok("the larger icon is too", code == 200 and Image.open(_io.BytesIO(data)).size 
 code, data, mime = raw("sw.js")
 ok("there is a service worker (needed for a phone to treat this as installable)", code == 200 and "fetch" in data.decode() and "javascript" in mime)
 
+# ---------------------------------------------------------------- nodes: scanning and pairing over the web API
+code, j = call("api/nodes")
+ok("nodes: nothing found or paired yet", code == 200 and j == {"paired": [], "found": []})
+real_scan = T.scan_for_nodes
+T.scan_for_nodes = lambda **kw: [{"node": "node_pwn", "version": "1.0.0", "name": "node-x", "mac": "02:00:00:00:00:09",
+                                  "ip": "192.0.2.50:8080", "handshakes": 4, "bssids": ["aabbccddeeff"], "uptime": 30}]
+code, j = call("api/nodes/scan", {})
+ok("nodes: scanning returns what it found", code == 200 and j["ok"] and len(j["found"]) == 1 and j["found"][0]["mac"] == "02:00:00:00:00:09")
+code, j = call("api/nodes/pair", {"mac": "02:00:00:00:00:09"})
+ok("nodes: pairing a found node works", code == 200 and j["ok"] and len(j["paired"]) == 1 and not j["found"])
+code, j = call("api/nodes")
+ok("nodes: the pairing sticks", len(j["paired"]) == 1 and j["paired"][0]["name"] == "node-x")
+code, j = call("api/nodes/pair", {"mac": "02:00:00:00:00:99"})
+ok("nodes: pairing an unknown mac fails cleanly, not a crash", code == 200 and j["ok"] is False)
+code, j = call("api/nodes/unpair", {"mac": "02:00:00:00:00:09"})
+ok("nodes: unpairing works", code == 200 and j["ok"] and not j["paired"])
+T.scan_for_nodes = real_scan
+
 finish()

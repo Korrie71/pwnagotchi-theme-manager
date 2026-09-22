@@ -38,6 +38,7 @@ with pwnagotchi's mood. Themes are small JSON files you can edit in a web editor
 - **Sonar radar:** a rotating sweep showing nearby networks as blips (distance = signal strength, a stable bearing per device); tap one for details. Display-only, never affects what gets attacked
 - **Cracking dashboard:** every captured handshake with its upload/crack status, a local handshake-quality guess (full/PMKID/partial/junk), and its location if pwnagotchi’s gps plugin has one, on the screen and in the editor
 - **GPS map:** an OpenStreetMap view of your own captured handshakes in the web editor, with a plain-list fallback if the map tiles cannot load
+- **Nodes:** pair with other units (a Pi Zero W running the small `node_pwn.py` companion) on the same network, scanned for from the touch menu or the web editor; a paired node's captures also mark a network as already covered on the Radar, so a group of units cover more distinct ground
 - **Move anything on the screen:** tap an element in the touch menu and nudge it with small `+` and `-` buttons (or do it in the web editor)
 - **Achievements:** unlock them for handshakes, uptime, themes tried and more, on the screen and in the editor
 - **Overheating auto-off (optional):** a countdown on the screen, then the Pi shuts itself down; a touch cancels it
@@ -66,7 +67,7 @@ And more, each with its own scenery: a Star Trek console, the seasons, landscape
 
 ![Two face packs](docs/images/faces.png)
 
-**Touch menu** (double tap the screen): themes, plugins, system, awards, layout and radar:
+**Touch menu** (double tap the screen): themes, plugins, system, awards, layout, radar and nodes:
 
 <p>
 <img src="docs/images/menu-themes.png" width="32%" alt="Themes tab">
@@ -80,6 +81,7 @@ And more, each with its own scenery: a Star Trek console, the seasons, landscape
 </p>
 <p>
 <img src="docs/images/menu-radar.png" width="32%" alt="Radar tab, a sonar-style sweep of nearby networks">
+<img src="docs/images/menu-nodes.png" width="32%" alt="Nodes tab, other units on the network">
 </p>
 
 **Web editor** with a live preview: drag text lines on the preview, or click a part of the screen to recolor it.
@@ -127,12 +129,22 @@ enabled = true
 
 </details>
 
+**Working with other units:** on a second pwnagotchi you want to pair with (a Pi Zero W wardriving alongside this
+one, say), install the small `node_pwn.py` companion instead of the full theme manager:
+
+```bash
+sudo ./Node_PWN.sh --restart
+```
+
+It just answers a small, read-only status API on that unit's own web UI; nothing to configure. Back on this (the
+"main") unit, open the web editor or touch menu's **Nodes** tab and scan — see [Use](#use) below.
+
 ## Use
 
 **Web editor:** open `http://<pi-address>:8080/plugins/theme_manager/`. Pick a theme, change colors and effects, drag text
 lines on the preview, click a part of the screen to recolor it, then **Apply to screen**. Themes you save appear in the list.
-The **Layout**, **Awards**, **Cracking**, **Radar**, **Map** and **Settings** tabs (overheating auto-off, achievements,
-brightness and night mode) are about the device rather than the theme.
+The **Layout**, **Awards**, **Cracking**, **Radar**, **Map**, **Nodes** and **Settings** tabs (overheating auto-off,
+achievements, brightness and night mode) are about the device rather than the theme.
 
 **Command line** (use pwnagotchi's Python):
 
@@ -162,6 +174,7 @@ $P mode                  # show the attack mode (or: mode passive / mode home)
 | **Layout** | every element on the screen; tap one to move it with `X -` `X +` `Y -` `Y +` (1, 5 or 10 pixels per tap), `reset` and `done`; `clear` puts everything back |
 | **Crack** | every captured handshake with a status pill (`PWND`/`WAIT`/`NEW`/`BAD`/`?`); tap one for the password, quality guess, or location if it has one |
 | **Radar** | a rotating sonar sweep of nearby networks; tap a blip for its name, encryption, client count, signal, and whether you already have its handshake. Display-only — it never affects what pwnagotchi attacks |
+| **Nodes** | other units running `node_pwn` on the same network; `scan` finds them, tap a found one to pair, tap a paired one and tap again to unpair. Shows name, address, handshake count and online/offline |
 
 Swipe sideways on the bare screen to change theme. `close`, a tap outside the menu, or 20 seconds of nothing closes it. It costs nothing while idle: one thread sleeps until
 the screen is touched.
@@ -218,7 +231,8 @@ python tests/run_all.py            # or run any tests/test_*.py on its own
 
 They cover theme validation and rendering (including a fuzz test), per-element colors, moods, face packs, the touch
 menu and calibration, plugin switching, the System tab, achievements, the layout mover, the cracking dashboard, the
-sonar radar, attack modes, the web API, the placeholders, the install script, and a scan that keeps
+sonar radar, node scanning and pairing (`node_pwn.py` and its own `Node_PWN.sh` installer included), attack modes,
+the web API, the placeholders, the install script, and a scan that keeps
 personal data out of the repository. The tools in [`tools/`](tools) regenerate the screenshots and the demo GIF from
 made-up data. GitHub Actions runs the tests on every push.
 

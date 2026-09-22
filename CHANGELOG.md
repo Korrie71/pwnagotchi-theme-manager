@@ -1,5 +1,20 @@
 # Changelog
 
+## 2.14.0
+
+**Nodes: work together with other units.** A new companion, `node_pwn.py` (install with `Node_PWN.sh`), turns a
+second pwnagotchi -- a Pi Zero W wardriving alongside your main unit, say -- into a "node": it answers a small,
+read-only status API on its own web UI with its identity and the BSSIDs it has already captured. On the main unit,
+theme_manager's new **Nodes** tab (touch menu and web editor) scans the local network for nodes, and lets you pair
+the ones you want to track. A paired node's captures now also mark a network as "already covered" on the sonar
+Radar, so a group of units end up covering more distinct ground instead of every unit re-attacking whatever a
+teammate already has. Purely advisory: nothing here changes what any unit's own bettercap decides to attack; a
+future version may build on this to actually steer targeting, once this read-only version has proven itself.
+
+Pairing is local and explicit: a node only becomes "paired" when you tap/click it after a scan, is remembered by its
+MAC (so a DHCP-reassigned IP does not lose it), and a paired node that goes offline is marked offline rather than
+silently dropped or its stale data kept.
+
 ## 2.13.0
 
 **Two more sprites.** A whale surfaces to blow a spout in `ocean`, off to one side and much more rarely than the
