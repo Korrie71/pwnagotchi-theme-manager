@@ -61,8 +61,8 @@ for f in text_files:
         domain = m.group(0).split("@", 1)[1]
         if re.fullmatch(r"[\d.]+", domain):   # a package-version pin in a CDN URL (e.g. leaflet@1.9.4), not an email
             continue
-        if "noreply" not in m.group(0) and not m.group(0).endswith(("@example.com", "@users.noreply.github.com")):
-            problems.append((f, "email", m.group(0)))
+        if "noreply" not in m.group(0) and not m.group(0).endswith(("@example.com", "@users.noreply.github.com", "@pwnagotchi.local")):
+            problems.append((f, "email", m.group(0)))   # pwnagotchi.local is the project's own generic mDNS default, not a real host
     for m in re.finditer(r"\b(?:[0-9a-fA-F]{2}:){5}[0-9a-fA-F]{2}\b", body):
         if not m.group(0).lower().startswith("02:00:00:00:00:"):   # the project's fake, locally-administered range for test data
             problems.append((f, "MAC address", m.group(0)))

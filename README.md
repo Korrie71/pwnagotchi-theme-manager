@@ -93,6 +93,28 @@ And more, each with its own scenery: a Star Trek console, the seasons, landscape
 
 ## Install
 
+### 0. Getting pwnagotchi itself onto the hardware
+
+Not this project — you need a working pwnagotchi before any of the guides below apply. Skip this if you already
+have one running.
+
+1. **Get the image.** Use the [jayofelony fork](https://github.com/jayofelony/pwnagotchi)'s
+   [latest release](https://github.com/jayofelony/pwnagotchi/releases/latest) — one 64-bit `.img.xz` for every
+   supported board (Pi Zero 2 W, Pi 3, Pi 4, Pi 5, ...). Recent releases dropped 32-bit support entirely, which
+   means the *original* Pi Zero W (single-core, no 64-bit) is no longer supported by current images; a **Pi Zero 2 W**
+   or newer is what you want.
+2. **Flash it** with the [Raspberry Pi Imager](https://www.raspberrypi.com/software/): "Choose OS" → "Use custom" →
+   pick the `.img.xz` you downloaded → pick your SD card. When it asks about applying OS customization/settings,
+   say **no** — the image already has everything it needs, and overwriting that can break first boot.
+3. **Connect to it.** No display or keyboard needed: plug a USB cable into the port closest to HDMI (Zero W/2 W) or
+   the USB-C/USB-A port (Pi 4/5) and your computer, install the RNDIS driver if you're on Windows, then
+   `ssh pi@pwnagotchi.local` (password `raspberry`). A Pi 4/5 can also just take an ethernet cable instead.
+
+Full step-by-step (and troubleshooting) is in the [jayofelony wiki](https://github.com/jayofelony/pwnagotchi/wiki).
+Once you're SSH'd in with pwnagotchi running, come back here.
+
+### 1. This plugin (the main unit with the screen)
+
 Requirements: pwnagotchi 2.9.x (the jayofelony fork) with a `waveshare35lcd` display. Pillow, numpy and Flask are already
 part of pwnagotchi. The touch menu additionally needs a touchscreen that shows up under `/dev/input`
 (for example an ADS7846/XPT2046 controller).
@@ -129,15 +151,28 @@ enabled = true
 
 </details>
 
-**Working with other units:** on a second pwnagotchi you want to pair with (a Pi Zero W wardriving alongside this
-one, say), install the small `node_pwn.py` companion instead of the full theme manager:
+### 2. `node_pwn` (any other units you want to pair with)
+
+On a second pwnagotchi you want to pair with (a Pi Zero 2 W wardriving alongside this one, say — same Step 0 above
+to get pwnagotchi onto it first), install the small `node_pwn.py` companion instead of the full theme manager.
+SSH into *that* unit and either clone the repo there too, or just copy the two files over from this one:
 
 ```bash
+# on the other unit
+git clone https://github.com/Korrie71/pwnagotchi-theme-manager.git && cd pwnagotchi-theme-manager
 sudo ./Node_PWN.sh --restart
 ```
 
-It just answers a small, read-only status API on that unit's own web UI; nothing to configure. Back on this (the
-"main") unit, open the web editor or touch menu's **Nodes** tab and scan — see [Use](#use) below.
+```bash
+# or, from this unit, copy just the two files it needs over SSH
+scp Node_PWN.sh node_pwn.py pi@<other-unit-address>:~/
+ssh pi@<other-unit-address> 'sudo bash ~/Node_PWN.sh --restart'
+```
+
+It just answers a small, read-only status API on that unit's own web UI (check with
+`curl http://<other-unit-address>:8080/plugins/node_pwn/api/info`); nothing to configure. Both units need to be on
+the same network. Back on this (the "main") unit, open the web editor or touch menu's **Nodes** tab and scan — see
+[Use](#use) below.
 
 ## Use
 
