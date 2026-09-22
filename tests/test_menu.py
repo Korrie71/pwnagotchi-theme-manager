@@ -271,4 +271,13 @@ img = Image.new("RGB", (480, 320))
 T.draw_toast(img, tm._toast[0], tm._theme)
 ok("drawing a long toast doesn't crash or run off both edges", True)
 
+# ---------------------------------------------------------------- no display right now (another tool briefly owns the panel)
+tm, ui, finger = calibrated()
+tm.open_menu("list")
+tm._display = None
+tm._refresh_now()
+ok("a redraw with nothing to draw to is a quiet no-op, not an AttributeError", True)
+tm._stat("handshakes", add=1)
+ok("...even when something else (like an achievement) triggers it", True)
+
 finish()

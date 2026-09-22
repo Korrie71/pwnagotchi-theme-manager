@@ -2548,7 +2548,7 @@ def _pwa_icon(size, theme):
 
 class ThemeManager(plugins.Plugin):
     __author__ = "theme_manager contributors"
-    __version__ = "2.11.1"
+    __version__ = "2.11.2"
     __license__ = "GPL3"
     __description__ = "Theme engine for the 3.5 inch display: colors, effects, animations, custom text, web GUI."
 
@@ -2919,6 +2919,8 @@ class ThemeManager(plugins.Plugin):
 
     def _present(self, img):
         """Write a frame to the framebuffer, sending only the rows that changed."""
+        if self._display is None:
+            return   # no display right now (e.g. another tool briefly owns the panel): nothing to draw to
         fbm = self._display._display
         if not self._fast:
             fbm.show_img(img)

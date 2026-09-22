@@ -1,5 +1,11 @@
 # Changelog
 
+## 2.11.2
+
+Fixed: if something else briefly takes over the physical display (tested against a compatible tool that hands the
+panel back and forth with pwnagotchi), a background redraw (an achievement unlocking, for example) logged an
+`AttributeError` instead of quietly doing nothing. It never crashed anything, just an unnecessary error in the log.
+
 ## 2.11.1
 
 Feedback from someone who tried the touch menu: everything was clean and easy, but the navigation felt finicky.
