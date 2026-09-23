@@ -339,21 +339,30 @@ already have a handshake for it (shown dimmed and ranked lower; this now also in
 below). Like the Cracking tab, this is purely a display: it never changes what pwnagotchi decides to attack. The web
 editor's Radar tab shows the same sweep, redrawn live.
 
-**Nodes** finds other units, on the same network, running the small `node_pwn.py` companion plugin (install it with
-`Node_PWN.sh`, the same way as this plugin's own `install.sh`). `scan` probes the local subnet for a few seconds; tap a found
-unit to pair with it, tap a paired one for its address and handshake count, tap it again within a few seconds to
-unpair. A paired node is remembered by its MAC address (so a new DHCP-assigned IP does not lose it) and, if it goes
-offline, is shown as offline rather than dropped or left showing stale numbers. Pairing is purely local to this unit;
-the node itself never initiates anything and never talks to any other node on its own. The one thing pairing
-actually changes: a network a paired, *online* node has already captured now also shows as covered on your own
-Radar, so a group of units end up covering more distinct ground instead of every unit attacking the same network.
+**Nodes** finds other units running the small `node_pwn.py` companion plugin (install it with `Node_PWN.sh`, the
+same way as this plugin's own `install.sh`), so a group of units end up covering more distinct ground instead of
+every unit attacking the same network. Three ways to find one, in the order this tab tries them:
 
-`scan` only ever probes your own local subnet, so it will never find a node on a different network. For that, the
-web editor's Nodes tab also has an **"add by address"** field: type in whatever address actually reaches it (an IP
-on a VPN/Tailscale you have both units joined to, or a port you have forwarded to it through your router) and it
-pairs immediately, no scan needed. It is still the same read-only status check either way — just told exactly where
-to look instead of guessing from the subnet. The touch menu can only scan (there is no keyboard to type an address
-with); use the web editor for a node that is not on the same network.
+1. **Mesh (automatic).** A node advertises its identity and captured BSSIDs over pwnagotchi's own local mesh
+   (`pwngrid`) — the same beacon-frame "parasite protocol" that already lets two nearby pwnagotchis notice each
+   other, broadcast directly over WiFi with no association, no network, no IP at all. A node within radio range
+   just shows up here on its own, continuously, with no scan needed; it disappears back to offline (not dropped) the
+   moment it drifts out of range. This is the normal case for two units out wardriving together.
+2. **Scan (same network).** `scan` also probes your own local subnet for a few seconds over plain HTTP, for a node
+   that is reachable that way instead (or as well) — the same network as this unit, or a hotspot bridging the two.
+3. **Add by address (anything else).** For a node that is neither in mesh range nor on this network, the web
+   editor's Nodes tab has an **"add by address"** field: type in whatever address actually reaches it (an IP on a
+   VPN/Tailscale you have both units joined to, or a port you have forwarded to it through your router) and it
+   pairs immediately, no scan needed. The touch menu can only do 1 and 2 (there is no keyboard here to type an
+   address with); use the web editor for this one.
+
+Tap a found node to pair with it, tap a paired one for its address (or signal, for a mesh find) and handshake
+count, tap it again within a few seconds to unpair. A paired node is remembered by its MAC address (so a new
+DHCP-assigned IP, or simply drifting in and out of mesh range, never loses the pairing) and, if it goes offline, is
+shown as offline rather than dropped or left showing stale numbers. Pairing is purely local to this unit; a node
+itself never initiates anything and never talks to any other node on its own -- it only ever answers. The one thing
+pairing actually changes: a network a paired, *online* node has already captured now also shows as covered on your
+own Radar.
 
 Each handshake also gets a **quality** guess, worked out locally from the capture itself instead of waiting for
 wpa-sec: a full handshake, a PMKID (crackable without a client ever connecting), only a partial capture, or empty

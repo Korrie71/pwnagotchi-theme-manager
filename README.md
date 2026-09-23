@@ -38,7 +38,7 @@ with pwnagotchi's mood. Themes are small JSON files you can edit in a web editor
 - **Sonar radar:** a rotating sweep showing nearby networks as blips (distance = signal strength, a stable bearing per device); tap one for details. Display-only, never affects what gets attacked
 - **Cracking dashboard:** every captured handshake with its upload/crack status, a local handshake-quality guess (full/PMKID/partial/junk), and its location if pwnagotchi’s gps plugin has one, on the screen and in the editor
 - **GPS map:** an OpenStreetMap view of your own captured handshakes in the web editor, with a plain-list fallback if the map tiles cannot load
-- **Nodes:** pair with other units (a Pi Zero W running the small `node_pwn.py` companion), scanned for on the local network from the touch menu or the web editor, or added directly by address (a VPN, or a forwarded port) from the web editor if it is on a different one; a paired node's captures also mark a network as already covered on the Radar, so a group of units cover more distinct ground
+- **Nodes:** pair with other units (a Pi Zero W running the small `node_pwn.py` companion) so a group covers more distinct ground instead of each attacking the same network twice. One in WiFi range shows up on its own over pwnagotchi's own mesh — no shared network needed at all; failing that, scan the local network, or add one directly by address (a VPN, or a forwarded port) from the web editor. A paired node's captures mark a network as already covered on the Radar
 - **Move anything on the screen:** tap an element in the touch menu and nudge it with small `+` and `-` buttons (or do it in the web editor)
 - **Achievements:** unlock them for handshakes, uptime, themes tried and more, on the screen and in the editor
 - **Overheating auto-off (optional):** a countdown on the screen, then the Pi shuts itself down; a touch cancels it
@@ -169,11 +169,13 @@ scp Node_PWN.sh node_pwn.py pi@<other-unit-address>:~/
 ssh pi@<other-unit-address> 'sudo bash ~/Node_PWN.sh --restart'
 ```
 
-It just answers a small, read-only status API on that unit's own web UI (check with
-`curl http://<other-unit-address>:8080/plugins/node_pwn/api/info`); nothing to configure. Back on this (the "main")
-unit, open the web editor or touch menu's **Nodes** tab and scan — that only finds units on the *same* network,
-though; for one on a different network, use the web editor's Nodes tab to add it by address instead (whatever
-actually reaches it — a VPN/Tailscale IP, or a port you have forwarded to it). See [Use](#use) below.
+Nothing to configure: it starts advertising over pwnagotchi's own local mesh right away (the same beacon-frame
+broadcast already used for two nearby units to notice each other), so once it is back up it should just show up on
+this (the "main") unit's **Nodes** tab — touch menu or web editor — on its own, no shared network required, just
+ordinary WiFi range. It also answers a small, read-only status API on its own web UI, if you would rather check with
+`curl http://<other-unit-address>:8080/plugins/node_pwn/api/info`, or the two units *are* reachable over IP: the web
+editor's Nodes tab can scan the local network too, or add a specific address directly (a VPN/Tailscale IP, or a port
+you have forwarded to it) for one that is neither in mesh range nor on this network. See [Use](#use) below.
 
 ## Use
 
@@ -210,7 +212,7 @@ $P mode                  # show the attack mode (or: mode passive / mode home)
 | **Layout** | every element on the screen; tap one to move it with `X -` `X +` `Y -` `Y +` (1, 5 or 10 pixels per tap), `reset` and `done`; `clear` puts everything back |
 | **Crack** | every captured handshake with a status pill (`PWND`/`WAIT`/`NEW`/`BAD`/`?`); tap one for the password, quality guess, or location if it has one |
 | **Radar** | a rotating sonar sweep of nearby networks; tap a blip for its name, encryption, client count, signal, and whether you already have its handshake. Display-only — it never affects what pwnagotchi attacks |
-| **Nodes** | other units running `node_pwn`; `scan` finds ones on the same network, tap a found one to pair, tap a paired one and tap again to unpair. Shows name, address, handshake count and online/offline. A node on a *different* network can be added by address instead, from the web editor's Nodes tab (no keyboard here to type one with) |
+| **Nodes** | other units running `node_pwn`; one in WiFi range shows up here on its own, over pwnagotchi's own mesh (no shared network needed). `scan` also checks the local network. Tap a found one to pair, tap a paired one and tap again to unpair. Shows name, address (or signal, for a mesh find), handshake count and online/offline. A node that is neither in mesh range nor on this network can be added by address instead, from the web editor's Nodes tab (no keyboard here to type one with) |
 
 Swipe sideways on the bare screen to change theme. `close`, a tap outside the menu, or 20 seconds of nothing closes it. It costs nothing while idle: one thread sleeps until
 the screen is touched.

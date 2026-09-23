@@ -119,4 +119,20 @@ code, j = call("api/nodes/add", {"host": ""})
 ok("nodes: an empty address is refused, not a crash", code == 200 and j["ok"] is False)
 T._probe_node = real_probe
 
+# nodes: a mesh peer (no network at all, just WiFi range) shows up in api/nodes on its own, no scan
+real_mesh = T._mesh_peers
+T._mesh_peers = lambda: [{"node": "node_pwn", "mac": "02:00:00:00:00:0b", "name": "node-mesh", "ip": None,
+                          "handshakes": 2, "bssids": ["aabbccddeeff"], "via": "mesh", "rssi": -60}]
+code, j = call("api/nodes")
+ok("nodes: a mesh peer is listed as found without any scan", code == 200 and any(f["mac"] == "02:00:00:00:00:0b" and f["ip"] is None for f in j["found"]))
+code, j = call("api/nodes/pair", {"mac": "02:00:00:00:00:0b"})
+ok("nodes: pairing a mesh peer works the same way", code == 200 and j["ok"] and j["paired"][0]["via"] == "mesh"
+   and j["paired"][0]["bssids"] == ["aabbccddeeff"])
+T._mesh_peers = lambda: []
+tm.refresh_paired_nodes()
+code, j = call("api/nodes")
+ok("nodes: out of range, it is offline rather than gone", j["paired"][0]["online"] is False and j["paired"][0]["mac"] == "02:00:00:00:00:0b")
+call("api/nodes/unpair", {"mac": "02:00:00:00:00:0b"})
+T._mesh_peers = real_mesh
+
 finish()

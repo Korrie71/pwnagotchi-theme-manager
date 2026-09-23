@@ -9,6 +9,7 @@ import time
 from _util import Panel, T, finish, new_manager, ok, sandbox
 
 sandbox()
+import pwnagotchi.grid as G  # noqa: E402
 
 
 def make_handler(body_bytes, status=200):
@@ -123,6 +124,45 @@ srv_other.shutdown()
 srv_other.server_close()
 srv_nomac.shutdown()
 srv_nomac.server_close()
+
+# ---------------------------------------------------------------- mesh peers: no network needed at all, e.g. a unit
+# out wardriving on its own -- this is what actually answers "they cannot be on the same network"
+sandbox()
+MESH_PEER = {"advertisement": {"node_pwn": {"mac": "02:00:00:00:00:0b", "name": "node-mesh", "n": 2,
+                                            "b": ["aabbccddeeff", "112233445566"]}}, "rssi": -55, "channel": 6}
+G.peers = lambda: [MESH_PEER, {"advertisement": {"name": "just-a-normal-pwnagotchi-peer"}}, {"advertisement": None}, {}]
+mesh = T._mesh_peers()
+ok("finds a node_pwn peer on the mesh, ignoring an ordinary pwnagotchi peer and a malformed one",
+   len(mesh) == 1 and mesh[0]["mac"] == "02:00:00:00:00:0b", mesh)
+ok("carries its bssids, handshake count and signal", mesh[0]["bssids"] == ["aabbccddeeff", "112233445566"]
+   and mesh[0]["handshakes"] == 2 and mesh[0]["rssi"] == -55)
+ok("tagged as a mesh find, with no ip (there is no network connection to have one)", mesh[0]["via"] == "mesh" and mesh[0]["ip"] is None)
+
+G.peers = lambda: (_ for _ in ()).throw(RuntimeError("pwngrid-peer is not running"))
+ok("pwngrid being unreachable is not a crash, just nothing found", T._mesh_peers() == [])
+G.peers = lambda: [MESH_PEER]
+
+tm3b, ui3b, els3b = new_manager()
+tm3b._settings = T.clean_settings({})
+tm3b._display_cfg = T.clean_display({})
+paired, found = tm3b.node_rows()
+ok("a mesh peer shows up as found with no scan ever run", paired == [] and any(f["mac"] == "02:00:00:00:00:0b" for f in found))
+ok("pairing a mesh-found node works the same way as a scanned one", tm3b.pair_node("02:00:00:00:00:0b") is True)
+paired, found = tm3b.node_rows()
+ok("...and is remembered as a mesh pairing", paired[0]["via"] == "mesh" and paired[0]["mac"] == "02:00:00:00:00:0b")
+ok("...its bssids feed the shared 'a teammate already has this' set like any other paired node",
+   tm3b.all_node_bssids() == {"aabbccddeeff", "112233445566"})
+
+G.peers = lambda: []   # it walked out of WiFi range
+tm3b.refresh_paired_nodes()
+paired, _ = tm3b.node_rows()
+ok("a mesh-paired node out of range is marked offline (not re-probed over IP -- it has none)", paired[0]["online"] is False)
+ok("...and its bssids stop counting while offline", tm3b.all_node_bssids() == set())
+G.peers = lambda: [MESH_PEER]   # back in range
+tm3b.refresh_paired_nodes()
+paired, _ = tm3b.node_rows()
+ok("...and back online once it is back in range", paired[0]["online"] is True)
+G.peers = lambda: []   # nothing on the mesh from here on, so the rest of the tests are not affected by it
 
 # ---------------------------------------------------------------- the touch menu
 sandbox()

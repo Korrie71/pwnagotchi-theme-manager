@@ -1,5 +1,15 @@
 # Changelog
 
+## 2.15.0
+
+**Nodes find each other over WiFi directly now, no network at all.** `node_pwn` advertises this unit's identity and
+captured BSSIDs over pwnagotchi's own local mesh (`pwngrid`) -- the same beacon-frame broadcast that already lets
+two nearby pwnagotchis notice each other, direct radio to radio, no association, no shared network, no IP, the same
+idea as ESP-NOW's direct peer broadcasts. A node within WiFi range now just shows up on the main unit's Nodes tab
+(touch menu or web editor) on its own, continuously, and goes back to offline (not dropped) the moment it drifts out
+of range -- no scan needed, no config, the normal case for two units out wardriving together. Scanning the local
+network and adding a specific address remain as they were, for a node reachable that way instead.
+
 ## 2.14.1
 
 **Fixed: pairing with a node on a different network.** Scanning for nodes only ever probed your own local subnet by

@@ -257,11 +257,24 @@ with sync_playwright() as p:
     tab("Nodes")
     page.wait_for_timeout(200)
     check("the Nodes tab loads with no browser error (nothing found yet)", page.locator("p:has-text('No nodes yet')").count() == 1)
+
+    mesh_node = {"node": "node_pwn", "mac": "02:00:00:00:00:0b", "name": "zz-e2e-mesh", "ip": None,
+                 "handshakes": 6, "bssids": ["aabbccddeeff"], "via": "mesh", "rssi": -58}
+    page.route("**/api/nodes", lambda r: r.fulfill(body=json.dumps({"paired": [], "found": [mesh_node]}), content_type="application/json"))
+    tab("Settings")
+    tab("Nodes")   # round-trip through another tab to force a fresh loadNodes() with the mesh peer now "in range"
+    page.wait_for_timeout(200)
+    check("a node in mesh range shows up on its own, no scan or address needed",
+          page.locator(".erow:has-text('zz-e2e-mesh')").count() == 1)
+    check("...shown as 'mesh' with its signal instead of an address it does not have",
+          "mesh, -58 dBm" in page.locator(".erow:has-text('zz-e2e-mesh')").inner_text())
+    page.unroute("**/api/nodes")
+
     fake_node = {"node": "node_pwn", "version": "1.0.0", "name": "zz-e2e-node", "mac": "02:00:00:00:00:09",
                  "ip": "192.0.2.50:8080", "handshakes": 4, "bssids": ["aabbccddeeff"], "uptime": 30}
     page.route("**/api/nodes/scan", lambda r: r.fulfill(body=json.dumps({"ok": True, "paired": [], "found": [fake_node]}),
                                                           content_type="application/json"))
-    page.click("button:text-is('Scan for nodes')")
+    page.click("button:text-is('Scan for nodes on this network')")
     page.wait_for_selector(".erow:has-text('zz-e2e-node')")
     check("a found node shows up with a Pair button", page.locator(".erow:has-text('zz-e2e-node') button:text-is('Pair')").count() == 1)
     page.unroute("**/api/nodes/scan")

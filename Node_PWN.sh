@@ -100,6 +100,8 @@ if [ "$CONFIG" = 1 ]; then
 fi
 
 echo
-echo "Done. This unit is now a node: on your main unit, open the theme manager's web editor -> Nodes tab -> Scan,"
-echo "and it should show up (both units need to be on the same network)."
+echo "Done. This unit is now a node: once it is back up, it starts advertising over pwnagotchi's own mesh, so it"
+echo "should just show up on your main unit's Nodes tab (touch menu or web editor) on its own -- no shared network"
+echo "needed, just ordinary WiFi range. Out of range, or on a different network entirely? The web editor's Nodes tab"
+echo "can also scan this same network, or add a specific address directly."
 restart_service

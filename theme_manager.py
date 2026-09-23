@@ -645,6 +645,29 @@ def scan_for_nodes(hosts=None, port=NODE_PORT, timeout=NODE_TIMEOUT, workers=48)
     return found
 
 
+def _mesh_peers():
+    """node_pwn units nearby on pwnagotchi's own local mesh (pwngrid): its beacon-frame-carried advertisement,
+    the same "ESP-NOW style" direct radio broadcast already used for two nearby units to notice each other. No
+    shared network, no IP, no scan -- just ordinary WiFi range, and it is already running on every unit. Read only:
+    what a peer chooses to advertise, cheap and instant (a local call to pwngrid-peer), never a network probe."""
+    try:
+        import pwnagotchi.grid as grid
+    except Exception:
+        return []
+    out = []
+    try:
+        for p in grid.peers():
+            adv = (p.get("advertisement") or {}).get("node_pwn")
+            if not isinstance(adv, dict) or not adv.get("mac"):
+                continue
+            out.append({"node": "node_pwn", "mac": adv["mac"], "name": adv.get("name") or "?", "ip": None,
+                        "handshakes": int(adv.get("n") or 0), "bssids": adv.get("b") or [],
+                        "via": "mesh", "rssi": p.get("rssi")})
+    except Exception as e:
+        logging.debug("[theme_manager] mesh peers: %s", e)
+    return out
+
+
 def _load_nodes():
     try:
         with open(NODES_FILE) as fp:
@@ -2799,7 +2822,7 @@ def _pwa_icon(size, theme):
 
 class ThemeManager(plugins.Plugin):
     __author__ = "theme_manager contributors"
-    __version__ = "2.14.1"
+    __version__ = "2.15.0"
     __license__ = "GPL3"
     __description__ = "Theme engine for the 3.5 inch display: colors, effects, animations, custom text, web GUI."
 
@@ -3547,13 +3570,17 @@ class ThemeManager(plugins.Plugin):
         return found
 
     def pair_node(self, mac):
-        """Remember a node found by the last scan, keyed by its (stable) MAC rather than its (DHCP-assigned) IP."""
+        """Remember a node found by the last scan or seen right now on the mesh, keyed by its (stable) MAC rather
+        than its (DHCP-assigned, or nonexistent, for a mesh-only peer) IP."""
         if not mac:
             return False
         with self._nodes_lock:
             info = next((n for n in self._nodes_found if n.get("mac") == mac), None)
-            if not info:
-                return False
+        if not info:
+            info = next((n for n in _mesh_peers() if n.get("mac") == mac), None)
+        if not info:
+            return False
+        with self._nodes_lock:
             self._nodes_paired[mac] = dict(info, last_seen=time.time(), online=True)
             paired = dict(self._nodes_paired)
         _save_nodes(paired)
@@ -3561,8 +3588,9 @@ class ThemeManager(plugins.Plugin):
 
     def add_node(self, host):
         """Pair with a specific address directly, whether or not it is on the local subnet -- for a node that is
-        not reachable by the local scan (a different network, reached over a VPN/tunnel or a port forward). Unlike
-        pair_node this does not need a prior scan: it probes the address itself, patiently, right now."""
+        not reachable by the local scan or the mesh (a different network, reached over a VPN/tunnel or a port
+        forward). Unlike pair_node this does not need a prior scan: it probes the address itself, patiently, right
+        now."""
         host = (host or "").strip()
         if not host:
             return False, "give an address"
@@ -3570,7 +3598,7 @@ class ThemeManager(plugins.Plugin):
         if not info:
             return False, "could not reach a node_pwn unit there (check the address, and that it is running)"
         with self._nodes_lock:
-            self._nodes_paired[info["mac"]] = dict(info, last_seen=time.time(), online=True)
+            self._nodes_paired[info["mac"]] = dict(info, via="ip", last_seen=time.time(), online=True)
             paired = dict(self._nodes_paired)
         _save_nodes(paired)
         return True, info["name"]
@@ -3584,13 +3612,15 @@ class ThemeManager(plugins.Plugin):
         return existed
 
     def refresh_paired_nodes(self):
-        """Re-probe every paired node at its last-known address, updating stats or marking it offline. Patient
-        (NODE_TIMEOUT_MANUAL), not the fast subnet-sweep timeout: this is a handful of addresses, not hundreds, and
-        a paired node reached over the internet rather than the LAN needs the extra time to answer at all."""
+        """Re-check every paired node, updating stats or marking it offline. A mesh-paired node is re-checked
+        against the current mesh peers (it is "online" exactly when still in radio range); an IP-paired one is
+        re-probed at its last-known address, patiently (NODE_TIMEOUT_MANUAL, not the fast subnet-sweep timeout --
+        this is a handful of addresses, not hundreds, and one reached over the internet needs the extra time)."""
         with self._nodes_lock:
-            targets = [(mac, info.get("ip")) for mac, info in self._nodes_paired.items()]
-        for mac, ip in targets:
-            info = _probe_node(ip, timeout=NODE_TIMEOUT_MANUAL) if ip else None
+            targets = [(mac, info.get("ip"), info.get("via", "ip")) for mac, info in self._nodes_paired.items()]
+        mesh_by_mac = {p["mac"]: p for p in _mesh_peers()} if any(via == "mesh" for _, _, via in targets) else {}
+        for mac, ip, via in targets:
+            info = mesh_by_mac.get(mac) if via == "mesh" else (_probe_node(ip, timeout=NODE_TIMEOUT_MANUAL) if ip else None)
             with self._nodes_lock:
                 if mac not in self._nodes_paired:
                     continue
@@ -3603,10 +3633,16 @@ class ThemeManager(plugins.Plugin):
         _save_nodes(paired)
 
     def node_rows(self):
-        """(paired nodes, freshly-found-but-not-yet-paired nodes)."""
+        """(paired nodes, freshly-found-but-not-yet-paired nodes). "found" merges the last explicit subnet scan
+        with whoever is on the mesh right now, live -- no scan needed to see a mesh peer, it is either currently in
+        range or it is not."""
         with self._nodes_lock:
             paired = [dict(info, mac=mac) for mac, info in self._nodes_paired.items()]
-            found = [n for n in self._nodes_found if n.get("mac") not in self._nodes_paired]
+            scanned = list(self._nodes_found)
+        by_mac = {n["mac"]: n for n in scanned}
+        by_mac.update({n["mac"]: n for n in _mesh_peers()})   # freshest wins where both see the same unit
+        paired_macs = {p["mac"] for p in paired}
+        found = [n for n in by_mac.values() if n["mac"] not in paired_macs]
         paired.sort(key=lambda n: (not n.get("online", True), n.get("name", "")))
         return paired, found
 
@@ -3920,8 +3956,9 @@ class ThemeManager(plugins.Plugin):
                             self.toast("unpaired %s" % info["name"], seconds=3, now=now)
                         else:
                             menu["confirm"] = (("nodeunpair", info["mac"]), now + CONFIRM_S)
+                            where = info["ip"] or ("mesh, %d dBm" % info["rssi"] if info.get("rssi") is not None else "mesh")
                             msg = "%s: %s, %d handshake%s, %s -- tap again to unpair" % (
-                                info["name"], info["ip"], info["handshakes"], "" if info["handshakes"] == 1 else "s",
+                                info["name"], where, info["handshakes"], "" if info["handshakes"] == 1 else "s",
                                 "online" if info.get("online", True) else "offline")
                             self.toast(msg, seconds=4, now=now)
                         self._refresh_now()
@@ -5061,31 +5098,32 @@ function panelMap(){const p=E('div'),count=locations.rows.length;
  return p}
 let nodes={paired:[],found:[]},nodesScanning=false;
 async function loadNodes(){try{nodes=await(await fetch(base+'/api/nodes')).json()}catch(e){}}
+const nodeWhere=n=>n.ip?n.ip:('mesh'+(n.rssi!=null?', '+n.rssi+' dBm':''));
 function panelNodes(){const p=E('div');
- p.append(E('p',{style:'color:var(--dim);margin:0 0 10px'},'Other units running node_pwn (install it with Node_PWN.sh). Pair one to see its capture stats here; a paired node’s handshakes count as already covered on the Radar tab, so a group of units end up covering more ground instead of attacking the same network twice.'));
+ p.append(E('p',{style:'color:var(--dim);margin:0 0 10px'},'Other units running node_pwn (install it with Node_PWN.sh). Nodes in WiFi range show up here on their own, over pwnagotchi’s own mesh -- no shared network needed. Pair one to see its capture stats here; a paired node’s handshakes count as already covered on the Radar tab, so a group of units end up covering more ground instead of attacking the same network twice.'));
  const btn=E('button',{onclick:async()=>{if(nodesScanning)return;nodesScanning=true;btn.textContent='scanning…';btn.disabled=true;
   try{const r=await(await post('nodes/scan',{})).json();nodes={paired:r.paired,found:r.found}}catch(e){}
-  finally{nodesScanning=false;panel()}}},'Scan for nodes');
+  finally{nodesScanning=false;panel()}}},'Scan for nodes on this network');
  p.append(btn);
  p.append(E('p',{style:'color:var(--dim);margin:10px 0 4px;font-size:12px'},
-  'Scan only finds units on this same network. On a different one (a unit out wardriving on its own, say), add it directly if you can reach it -- over a VPN/Tailscale address, or a port you have forwarded to it:'));
+  'Scan only ever checks this same network -- mesh nodes need no scan at all. For one that is neither in mesh range nor on this network, add it directly if you can reach it some other way -- a VPN/Tailscale address, or a port you have forwarded to it:'));
  const hostIn=E('input',{type:'text',placeholder:'address or address:port',style:'width:220px;margin-right:6px'});
  const addBtn=E('button',{onclick:async()=>{const host=hostIn.value.trim();if(!host)return;addBtn.textContent='adding…';addBtn.disabled=true;
   try{const r=await(await post('nodes/add',{host})).json();nodes={paired:r.paired,found:r.found};say(r.ok?'':(r.error||'could not add that node'))}
   catch(e){say('could not add that node')}
   finally{addBtn.textContent='Add';addBtn.disabled=false;panel()}}},'Add');
  p.append(E('div',{class:'row',style:'margin-bottom:10px'},hostIn,addBtn));
- if(!nodes.paired.length&&!nodes.found.length){p.append(E('p',{style:'color:var(--dim);margin-top:10px'},'No nodes yet. Scan, or add one by address above.'));return p}
+ if(!nodes.paired.length&&!nodes.found.length){p.append(E('p',{style:'color:var(--dim);margin-top:10px'},'No nodes yet: none in mesh range, and nothing found on this network. Bring one closer, scan, or add one by address above.'));return p}
  for(const n of nodes.paired){
   p.append(E('div',{class:'erow'+(n.online?' set':''),style:n.online?'':'opacity:.55'},
    E('span',{class:'ename',style:'width:170px'},(n.online?'● ':'○ ')+n.name),
-   E('span',{class:'inh',style:'flex:1'},n.ip+'  ·  '+n.handshakes+' handshake'+(n.handshakes===1?'':'s')+(n.online?'':'  (offline)')),
-   E('button',{onclick:async()=>{nodes=await(await post('nodes/unpair',{mac:n.mac})).json();panel()}},'Unpair')))}
+   E('span',{class:'inh',style:'flex:1'},nodeWhere(n)+'  ·  '+n.handshakes+' handshake'+(n.handshakes===1?'':'s')+(n.online?'':'  (offline)')),
+   E('button',{onclick:async()=>{const r=await(await post('nodes/unpair',{mac:n.mac})).json();nodes={paired:r.paired,found:r.found};panel()}},'Unpair')))}
  for(const n of nodes.found){
   p.append(E('div',{class:'erow set'},
    E('span',{class:'ename',style:'width:170px'},n.name),
-   E('span',{class:'inh',style:'flex:1'},n.ip+'  ·  '+n.handshakes+' handshake'+(n.handshakes===1?'':'s')),
-   E('button',{onclick:async()=>{nodes=await(await post('nodes/pair',{mac:n.mac})).json();panel()}},'Pair')))}
+   E('span',{class:'inh',style:'flex:1'},nodeWhere(n)+'  ·  '+n.handshakes+' handshake'+(n.handshakes===1?'':'s')),
+   E('button',{onclick:async()=>{const r=await(await post('nodes/pair',{mac:n.mac})).json();nodes={paired:r.paired,found:r.found};panel()}},'Pair')))}
  return p}
 let cfg={settings:{},display:{dim:1,night:null,idle:null},limits:{}};
 async function loadSettings(){try{cfg=await(await fetch(base+'/api/settings')).json()}catch(e){}}
