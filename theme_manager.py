@@ -2425,6 +2425,8 @@ def menu_hits(menu):
     tab, page = menu.get("tab", "themes"), menu["page"]
     if menu["mode"] == "adjust":
         return adjust_hits(menu)
+    if menu["mode"] == "wdmap":
+        return [((380, 268, 452, 308), ("wdmapclose", None))]
     tab_names, left, right = tab_layout(menu.get("tab_scroll", 0))
     tabs = [(rect, ("tab", name)) for name, rect in tab_names]
     if left:
@@ -2448,6 +2450,13 @@ def menu_hits(menu):
         hits.append(((326, 268, 374, 308), ("resetall", None)))
     elif tab == "nodes":
         hits.append(((326, 268, 374, 308), ("scan", None)))
+        for i, (rect, (_, arg)) in enumerate(hits):
+            if arg == "__wardrive__":   # the row splits: most of it opens the route map, the pill on the right toggles
+                x0, y0, x1, y1 = rect
+                btn0 = x1 - 96
+                hits[i] = ((x0, y0, btn0, y1), ("wdmap", None))
+                hits.insert(i + 1, ((btn0, y0, x1, y1), ("noderow", "__wardrive__")))
+                break
     return hits + [((28, 268, 118, 308), ("prev", None)), ((124, 268, 214, 308), ("next", None))] + common
 
 
@@ -2495,6 +2504,33 @@ def draw_radar(d, menu, bg, fg, acc, line):
     d.text((RADAR_CX, 50), text, font=_font(13, True), fill=fg, anchor="mm")
 
 
+def draw_wardrive_map(d, menu, fg, acc, line):
+    """A schematic sketch of the current trip's shape -- relative direction and distance only, not a real map: the
+    touch menu has no internet for map tiles. The web editor's Nodes tab has the full OpenStreetMap route for that."""
+    w = menu.get("wardrive") or {}
+    points = w.get("points") or []
+    d.text((240, 24), "Wardrive route", font=_font(16, True), fill=fg, anchor="mm")
+    x0, y0, x1, y1 = 40, 44, 440, 250
+    if len(points) < 2:
+        d.text((240, (y0 + y1) // 2), "Not enough points yet for a route", font=_font(14), fill=fg, anchor="mm")
+    else:
+        lats, lons = [p[0] for p in points], [p[1] for p in points]
+        latspan = max(max(lats) - min(lats), 1e-6)
+        lonspan = max(max(lons) - min(lons), 1e-6)
+
+        def to_px(lat, lon):
+            return (x0 + (lon - min(lons)) / lonspan * (x1 - x0), y1 - (lat - min(lats)) / latspan * (y1 - y0))
+
+        pixels = [to_px(lat, lon) for lat, lon in zip(lats, lons)]
+        d.line(pixels, fill=acc, width=3, joint="curve")
+        d.ellipse((pixels[0][0] - 5, pixels[0][1] - 5, pixels[0][0] + 5, pixels[0][1] + 5), outline=fg, width=2)
+        d.ellipse((pixels[-1][0] - 6, pixels[-1][1] - 6, pixels[-1][0] + 6, pixels[-1][1] + 6), fill=acc)
+        d.text((240, 262), "%s · %s" % (_fmt_dist_m(w.get("distance_m", 0)), _fmt_dur_s(w.get("duration_s", 0))),
+               font=_font(13), fill=fg, anchor="mm")
+    d.rounded_rectangle((380, 268, 452, 308), 8, fill=line, outline=acc, width=2)
+    d.text((416, 288), "close", font=_font(16, True), fill=fg, anchor="mm")
+
+
 def draw_menu(img, menu, theme):
     """Draw the menu (or the calibration prompt) onto an upright RGB frame."""
     d = ImageDraw.Draw(img)
@@ -2504,6 +2540,9 @@ def draw_menu(img, menu, theme):
         draw_adjust(d, menu, bg, fg, acc, panel, line)
         return
     d.rectangle((16, 8, 464, 312), fill=panel, outline=acc, width=2)
+    if menu["mode"] == "wdmap":
+        draw_wardrive_map(d, menu, fg, acc, line)
+        return
     if menu["mode"] == "calib":
         i = menu["step"]
         d.text((240, 60), "Touch calibration", font=_font(22, True), fill=fg, anchor="mm")
@@ -2619,12 +2658,15 @@ def draw_menu(img, menu, theme):
             if info["kind"] == "summary":
                 d.text((x0 + 6, (y0 + y1) // 2), info["text"], font=_font(14, True), fill=fg, anchor="lm")
             elif info["kind"] == "wardrive":
+                # drawn for the whole row regardless of which of the split hits (wdmap / this button) triggered it,
+                # so it always uses the row's real bounds rather than whichever narrower sub-rect this hit carries
                 active, cy = info.get("active", False), (y0 + y1) // 2
-                d.rectangle(rect, fill=line, outline=acc if active else line, width=2)
+                row = (28, y0, 452, y1)
+                d.rectangle(row, fill=line, outline=acc if active else line, width=2)
                 text = ("wardrive: %s, %s" % (_fmt_dist_m(info.get("distance_m", 0)), _fmt_dur_s(info.get("duration_s", 0)))
                         if active else "wardrive: stopped")
-                d.text((x0 + 12, cy), text, font=_font(15, active), fill=acc if active else fg, anchor="lm")
-                px0, px1 = x1 - 96, x1 - 10
+                d.text((28 + 12, cy), text, font=_font(15, active), fill=acc if active else fg, anchor="lm")
+                px0, px1 = 452 - 96, 452 - 10
                 d.rounded_rectangle((px0, y0 + 7, px1, y1 - 7), 10, fill=acc if active else panel, outline=acc, width=2)
                 d.text(((px0 + px1) // 2, cy), "STOP" if active else "START", font=_font(13, True),
                        fill=bg if active else fg, anchor="mm")
@@ -2651,6 +2693,8 @@ def draw_menu(img, menu, theme):
             d.rectangle(rect, fill=acc if menu.get("nodes_scanning") else line, outline=acc, width=1)
             d.text(((x0 + x1) // 2, (y0 + y1) // 2), "scanning…" if menu.get("nodes_scanning") else "scan",
                    font=_font(14, True), fill=bg if menu.get("nodes_scanning") else fg, anchor="mm")
+        elif act == "wdmap":
+            pass   # a bigger, invisible tap target over the wardrive row -- already drawn by its "noderow" hit
         elif act == "toggle":
             busy, on, bad = arg in menu["busy"], arg in menu["on"], arg in menu.get("failed", ())
             d.rectangle(rect, fill=line, outline=acc if on else line, width=2)
@@ -2908,7 +2952,7 @@ def _pwa_icon(size, theme):
 
 class ThemeManager(plugins.Plugin):
     __author__ = "theme_manager contributors"
-    __version__ = "2.17.0"
+    __version__ = "2.18.0"
     __license__ = "GPL3"
     __description__ = "Theme engine for the 3.5 inch display: colors, effects, animations, custom text, web GUI."
 
@@ -3387,6 +3431,10 @@ class ThemeManager(plugins.Plugin):
         summary = "%d paired (%d online) · %d found" % (len(paired), online, len(found))
         if paired:
             summary += " · %d team shake%s" % (team_shakes, "" if team_shakes == 1 else "s")
+            visible = {r["mac"].replace(":", "") for r in self.radar_rows()[0]}
+            if visible:
+                pct = round(100 * len(visible & self.all_node_bssids()) / len(visible))
+                summary += " · %d%% covered now" % pct
         info = {"__summary__": {"kind": "summary", "text": summary},
                 "__wardrive__": dict(w, kind="wardrive"),
                 "__skipnet__": {"kind": "skipnet", "on": self._settings["node_skip_captured"]}}
@@ -3649,18 +3697,18 @@ class ThemeManager(plugins.Plugin):
         self._node_whitelist_added = want
 
     def _node_skip_loop(self):
-        """Keeps the live whitelist (see _sync_node_whitelist) fresh on its own, so a node coming into or drifting
-        out of mesh range takes effect without needing the Nodes tab open. A no-op, cheap check when the setting is
-        off or nothing is paired."""
+        """Keeps every paired node's online/offline status current on its own, so it takes effect without needing
+        the Nodes tab open: a "back online" toast, and (see _sync_node_whitelist, opt-in) the live whitelist. A
+        no-op, cheap check when nothing is paired."""
         while self._running:
             self._node_skip_evt.wait(30)
             self._node_skip_evt.clear()
-            if not self._settings.get("node_skip_captured") or not self._nodes_paired:
+            if not self._nodes_paired:
                 continue
             try:
                 self.refresh_paired_nodes()   # also resyncs the whitelist, now that online/offline may have changed
             except Exception as e:
-                logging.debug("[theme_manager] node skip-list refresh: %s", e)
+                logging.debug("[theme_manager] node refresh: %s", e)
 
     def _load_home_watch(self):
         try:
@@ -3788,23 +3836,31 @@ class ThemeManager(plugins.Plugin):
         """Re-check every paired node, updating stats or marking it offline. A mesh-paired node is re-checked
         against the current mesh peers (it is "online" exactly when still in radio range); an IP-paired one is
         re-probed at its last-known address, patiently (NODE_TIMEOUT_MANUAL, not the fast subnet-sweep timeout --
-        this is a handful of addresses, not hundreds, and one reached over the internet needs the extra time)."""
+        this is a handful of addresses, not hundreds, and one reached over the internet needs the extra time).
+        A node going from offline back to online gets a toast -- easy to miss otherwise if you drifted apart and
+        back together during a wardrive."""
         with self._nodes_lock:
-            targets = [(mac, info.get("ip"), info.get("via", "ip")) for mac, info in self._nodes_paired.items()]
-        mesh_by_mac = {p["mac"]: p for p in _mesh_peers()} if any(via == "mesh" for _, _, via in targets) else {}
-        for mac, ip, via in targets:
+            targets = [(mac, info.get("ip"), info.get("via", "ip"), info.get("online", True), info.get("name", "?"))
+                       for mac, info in self._nodes_paired.items()]
+        mesh_by_mac = {p["mac"]: p for p in _mesh_peers()} if any(via == "mesh" for _, _, via, _, _ in targets) else {}
+        back_online = []
+        for mac, ip, via, was_online, name in targets:
             info = mesh_by_mac.get(mac) if via == "mesh" else (_probe_node(ip, timeout=NODE_TIMEOUT_MANUAL) if ip else None)
             with self._nodes_lock:
                 if mac not in self._nodes_paired:
                     continue
                 if info and info.get("mac") == mac:   # the address might now belong to a different device (DHCP)
                     self._nodes_paired[mac].update(info, last_seen=time.time(), online=True)
+                    if not was_online:
+                        back_online.append(self._nodes_paired[mac].get("nickname") or name)
                 else:
                     self._nodes_paired[mac]["online"] = False
         with self._nodes_lock:
             paired = dict(self._nodes_paired)
         _save_nodes(paired)
         self._sync_node_whitelist()
+        for name in back_online:
+            self.toast("%s is back online" % name, seconds=4)
 
     def node_rows(self):
         """(paired nodes, freshly-found-but-not-yet-paired nodes). "found" merges the last explicit subnet scan
@@ -4162,6 +4218,18 @@ class ThemeManager(plugins.Plugin):
                     if not menu.get("nodes_scanning"):
                         menu["nodes_scanning"] = True
                         threading.Thread(target=self._scan_nodes_bg, args=(menu,), daemon=True, name="theme-nodescan").start()
+                    return
+                elif act == "wdmap":
+                    if len((menu.get("wardrive") or {}).get("points") or []) < 2:
+                        self.toast("not enough points yet for a route", seconds=3, now=now)
+                    else:
+                        menu.update(mode="wdmap")
+                    self._refresh_now()
+                    return
+                elif act == "wdmapclose":
+                    menu.update(mode="list")
+                    self._sync_nodes_menu(menu)
+                    self._refresh_now()
                     return
                 elif act == "cal":
                     menu.update(mode="calib", step=0, raw=[])

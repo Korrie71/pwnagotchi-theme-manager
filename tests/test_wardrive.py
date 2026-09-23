@@ -138,4 +138,26 @@ finger.tap_rect(toggle_hit)
 ok("tapping it again stops the trip", tm4.wardrive_status()["active"] is False)
 ok("...with a toast to confirm it", tm4._toast and "wardrive stopped" in tm4._toast[0], tm4._toast)
 
+# ---------------------------------------------------------------- the on-device route map (a schematic sketch, not
+# a real map -- the touch menu has no internet for map tiles; the web editor's Nodes tab has the real OpenStreetMap one)
+map_hit = finger.hit("wdmap", None)
+tm4._toast = None
+finger.tap_rect(map_hit)
+ok("tapping the route with no track yet says so instead of opening an empty map", tm4._toast and "not enough points" in tm4._toast[0])
+ok("...and stays on the list", tm4._menu["mode"] == "list")
+
+tm4._wd_points = [{"lat": 52.0, "lon": 4.0, "t": 1.0}, {"lat": 52.01, "lon": 4.02, "t": 2.0}]
+tm4._sync_nodes_menu(tm4._menu)
+finger.tap_rect(map_hit)
+ok("tapping it with a real track opens the route map", tm4._menu["mode"] == "wdmap")
+T.draw_menu(Image.new("RGB", (480, 320)), tm4._menu, tm4._theme)
+ok("...and draws the route without crashing", True)
+
+close_hit = finger.hit("wdmapclose", None)
+finger.tap_rect(close_hit)
+ok("closing the map returns to the nodes list", tm4._menu["mode"] == "list" and tm4._menu["tab"] == "nodes")
+
+finger.tap_rect(toggle_hit)
+ok("the button half of the row still toggles the trip, unaffected by the split", tm4.wardrive_status()["active"] is True)
+
 finish()

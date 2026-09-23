@@ -369,6 +369,10 @@ node itself never initiates anything and never talks to any other node on its ow
 thing pairing actually changes: a network a paired, *online* node has already captured now also shows as covered on
 your own Radar.
 
+When a paired node that had gone offline comes back, a toast says so, and paired nodes are re-checked every 30 seconds
+while any are paired, so online/offline is current even with the Nodes tab closed. The summary line also shows what
+share of the networks visible on the Radar right now the online team's captures already cover ("25% covered now").
+
 If a node's own name is not descriptive (every fresh pwnagotchi install answers to "pwnagotchi" until renamed), the
 web editor's Nodes tab has a **Rename** button on each paired row: give it a local nickname and that is what shows
 up everywhere from then on, on both the touch menu and the web editor. The nickname lives only in this unit's own
@@ -385,6 +389,11 @@ saved to `/etc/pwnagotchi/themes/wardrive.json` and picked back up after a resta
 trip's summary even after it ends. Starting a new trip clears the previous one. The web editor's own Nodes tab shows
 the same status plus the full breadcrumb trail on an OpenStreetMap route (loaded only when you open the tab). Like
 Radar and Cracking, this is purely a log: it never changes what pwnagotchi attacks.
+
+Tap the Wardrive row itself (anywhere except the `START`/`STOP` pill on the right) and a **route map** pops up: a
+schematic sketch of the trip's shape and direction, with a ring at the start and a filled dot at the current end. It
+is not a real map -- the touch menu has no internet for map tiles, and the sketch is stretched to fit, so it is not to
+scale. The web editor's Nodes tab has the real OpenStreetMap route.
 
 Right below it is an optional, off-by-default row: **"skip a paired node's networks"** (touch menu) / **"skip
 networks a paired node already has"** (web editor). Turned on, a network a paired, online node has already captured

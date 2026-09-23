@@ -1,5 +1,17 @@
 # Changelog
 
+## 2.18.0
+
+**Wardrive route map on the touch screen.** Tap the Wardrive row (anywhere except the START/STOP pill, which still
+toggles the trip) and a route map pops up. It is a schematic sketch of the trip's shape and direction, not a real map
+-- the touch menu has no internet for map tiles, and it is stretched to fit, so it is not to scale. The web editor
+still has the real OpenStreetMap view.
+
+**Nodes: a "back online" toast, and a live coverage figure.** When a paired node that had gone offline comes back, a
+toast says so. Paired nodes are now re-checked every 30 seconds whenever any are paired (before, only while the
+skip-networks setting was on), so online/offline status is genuinely current. The summary line also shows what share
+of the networks visible right now the online team already has ("25% covered now").
+
 ## 2.17.0
 
 **Nodes: nicknames, last-seen, and a team handshake total.** A paired node's own reported name is often just

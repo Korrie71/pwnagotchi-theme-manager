@@ -176,10 +176,24 @@ tm3b.refresh_paired_nodes()
 paired, _ = tm3b.node_rows()
 ok("a mesh-paired node out of range is marked offline (not re-probed over IP -- it has none)", paired[0]["online"] is False)
 ok("...and its bssids stop counting while offline", tm3b.all_node_bssids() == set())
+tm3b._toast = None
+tm3b.refresh_paired_nodes()
+ok("...and staying offline is not newsworthy, no toast", tm3b._toast is None)
 G.peers = lambda: [MESH_PEER]   # back in range
 tm3b.refresh_paired_nodes()
 paired, _ = tm3b.node_rows()
 ok("...and back online once it is back in range", paired[0]["online"] is True)
+ok("...with a toast, easy to miss otherwise", tm3b._toast and "back online" in tm3b._toast[0], tm3b._toast)
+tm3b._toast = None
+tm3b.refresh_paired_nodes()
+ok("...but staying online is not newsworthy either, only the transition is", tm3b._toast is None)
+tm3b.rename_node("02:00:00:00:00:0b", "the good one")
+G.peers = lambda: []
+tm3b.refresh_paired_nodes()
+G.peers = lambda: [MESH_PEER]
+tm3b._toast = None
+tm3b.refresh_paired_nodes()
+ok("...and the toast uses a nickname when one is set", tm3b._toast and "the good one is back online" in tm3b._toast[0], tm3b._toast)
 G.peers = lambda: []   # nothing on the mesh from here on, so the rest of the tests are not affected by it
 
 # ---------------------------------------------------------------- actually skipping a teammate's captured networks
@@ -249,6 +263,18 @@ tm4.unpair_node("02:00:00:00:00:0c")
 tm4._sync_nodes_menu(menu4)
 ok("nothing paired at all: no team-shake mention, just the plain counts", "team shake" not in menu4["nodes_info"]["__summary__"]["text"],
    menu4["nodes_info"]["__summary__"]["text"])
+
+# ---------------------------------------------------------------- coverage: how much of what is visible the team has
+tm4._nodes_paired = {"02:00:00:00:00:0c": {"mac": "02:00:00:00:00:0c", "name": "teammate", "handshakes": 2,
+                                            "bssids": ["020000000021"], "online": True}}
+tm4._radar = [{"mac": "02:00:00:00:00:21"}, {"mac": "02:00:00:00:00:22"}, {"mac": "02:00:00:00:00:23"}, {"mac": "02:00:00:00:00:24"}]
+menu6 = {}
+tm4._sync_nodes_menu(menu6)
+ok("the summary says what share of the visible networks the team already has", "25% covered now" in menu6["nodes_info"]["__summary__"]["text"],
+   menu6["nodes_info"]["__summary__"]["text"])
+tm4._radar = []
+tm4._sync_nodes_menu(menu6)
+ok("nothing visible: no percentage (0% of nothing would mislead)", "covered now" not in menu6["nodes_info"]["__summary__"]["text"])
 
 # ---------------------------------------------------------------- the touch menu
 sandbox()
