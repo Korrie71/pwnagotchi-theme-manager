@@ -164,6 +164,58 @@ paired, _ = tm3b.node_rows()
 ok("...and back online once it is back in range", paired[0]["online"] is True)
 G.peers = lambda: []   # nothing on the mesh from here on, so the rest of the tests are not affected by it
 
+# ---------------------------------------------------------------- actually skipping a teammate's captured networks
+# (opt-in: Settings "node_skip_captured", off by default -- the one place besides attack modes that touches what
+# pwnagotchi itself decides to do, via the same live whitelist get_access_points() already checks)
+def agent_with(whitelist=()):
+    cfg = {"main": {"whitelist": list(whitelist)}}
+    return type("Agent", (), {"config": lambda self: cfg})(), cfg
+
+
+sandbox()
+tm4, ui4, els4 = new_manager()
+tm4._settings = T.clean_settings({})
+tm4._display_cfg = T.clean_display({})
+agent, cfg = agent_with(whitelist=["MyOwnHomeNetwork"])
+tm4._view._agent = agent
+tm4._nodes_paired = {"02:00:00:00:00:0c": {"mac": "02:00:00:00:00:0c", "name": "teammate",
+                                            "bssids": ["020000000021", "020000000022"], "online": True}}
+
+tm4._sync_node_whitelist()
+ok("off by default: nothing added even with a paired, online node", cfg["main"]["whitelist"] == ["MyOwnHomeNetwork"])
+
+tm4.save_settings(dict(tm4._settings, node_skip_captured=True))
+ok("turning it on adds the teammate's captured networks, as proper mac addresses",
+   set(cfg["main"]["whitelist"]) == {"MyOwnHomeNetwork", "02:00:00:00:00:21", "02:00:00:00:00:22"})
+ok("...and never touches the user's own whitelist entry", "MyOwnHomeNetwork" in cfg["main"]["whitelist"])
+
+tm4._nodes_paired["02:00:00:00:00:0c"]["online"] = False
+tm4._sync_node_whitelist()
+ok("a node going offline removes its entries again (the point of only counting online nodes)", cfg["main"]["whitelist"] == ["MyOwnHomeNetwork"])
+
+tm4._nodes_paired["02:00:00:00:00:0c"]["online"] = True
+tm4._sync_node_whitelist()
+ok("...and re-added once it is back online", set(cfg["main"]["whitelist"]) == {"MyOwnHomeNetwork", "02:00:00:00:00:21", "02:00:00:00:00:22"})
+
+tm4.unpair_node("02:00:00:00:00:0c")
+ok("unpairing removes its entries too, immediately, not waiting for the periodic refresh", cfg["main"]["whitelist"] == ["MyOwnHomeNetwork"])
+
+tm4._nodes_paired = {"02:00:00:00:00:0c": {"mac": "02:00:00:00:00:0c", "name": "teammate", "bssids": ["020000000021"], "online": True}}
+tm4._sync_node_whitelist()
+ok("re-paired (by hand, for the next check) and synced", "02:00:00:00:00:21" in cfg["main"]["whitelist"])
+tm4.save_settings(dict(tm4._settings, node_skip_captured=False))
+ok("turning it back off cleans up immediately too", cfg["main"]["whitelist"] == ["MyOwnHomeNetwork"])
+
+tm4.save_settings(dict(tm4._settings, node_skip_captured=True))
+bad_agent, bad_cfg = agent_with()
+bad_cfg["main"]["whitelist"] = "not a list"
+tm4._view._agent = bad_agent
+tm4._sync_node_whitelist()
+ok("a malformed (non-list) whitelist is a clean no-op, not a crash", True)
+tm4._view._agent = None
+tm4._sync_node_whitelist()
+ok("no live agent yet is also a clean no-op, not a crash", True)
+
 # ---------------------------------------------------------------- the touch menu
 sandbox()
 tm3, ui3, els3 = new_manager()

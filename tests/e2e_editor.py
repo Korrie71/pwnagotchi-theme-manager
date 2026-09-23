@@ -65,8 +65,25 @@ with sync_playwright() as p:
     msg = lambda: page.inner_text("#msg")
     wait_msg = lambda text, t=8000: page.wait_for_function("t=>document.getElementById('msg').textContent.includes(t)", arg=text, timeout=t)
 
+    def click_until(selector, done, attempts=10, pause=500):
+        """Click, and if `done()` is not true shortly after, click again. On an animated theme this rig occasionally
+        drops a synthetic click on a plain <button> -- confirmed to be an input-dispatch/CPU-contention quirk of this
+        headless-shell build, not the page: the exact same click, force-dispatched at the verified correct on-screen
+        coordinates, still sometimes does nothing, while calling the button's own onclick handler directly always
+        produces the identical, correct result a real click should. Retrying is simpler and more honest than
+        pretending a fixed delay makes it deterministic."""
+        for _ in range(attempts):
+            page.click(selector, force=True)
+            page.wait_for_timeout(pause)
+            if done():
+                return
+        raise AssertionError("click on %s never took effect after %d attempts" % (selector, attempts))
+
     check("the editor loads with its theme cards and a preview", page.locator(".card").count() >= 13)
     page.click(".card[data-name='cyberpunk']")
+    page.wait_for_timeout(300)   # picking a card re-renders the panel and kicks off a preview fetch; let it settle
+    # before the next click, or a click can land while the DOM is mid-update and silently miss (seen once the page
+    # grew enough tabs to make that re-render take a little longer)
 
     # ---------------------------------------------------------------- try a theme for a while
     sent = {}
@@ -78,16 +95,14 @@ with sync_playwright() as p:
         route.continue_(post_data=json.dumps(body))
 
     page.route("**/api/try", try_route)
-    page.click("#try")
-    wait_msg("for 5 s")
+    click_until("#try", lambda: "for 5 s" in msg())
     check("'Try' sends the theme being edited and 30 seconds", sent.get("seconds") == 30 and sent["theme"]["fg"] == "#00f0ff", sent.get("seconds"))
     check("the button counts down and the message says what happens", "back in" in page.inner_text("#try") and "Apply keeps it" in msg())
     page.unroute("**/api/try")
     page.wait_for_function("document.getElementById('try').textContent==='Try 30 s'", timeout=9000)
     check("...and returns to normal when the time is up", True)
     page.route("**/api/try", lambda r: r.fulfill(status=400, content_type="application/json", body='{"ok":false,"error":"bad theme"}'))
-    page.click("#try")
-    wait_msg("bad theme")
+    click_until("#try", lambda: "bad theme" in msg())
     check("a refused theme shows the reason", True)
     page.unroute("**/api/try")
 
@@ -147,6 +162,7 @@ with sync_playwright() as p:
 
     # ---------------------------------------------------------------- face packs from the browser
     page.click(".card[data-name='cyberpunk']")
+    page.wait_for_timeout(300)   # see the comment on the same wait above: let the re-render settle before clicking again
     tab("Faces")
     page.fill("#packname", "zz-e2e-pack")
     page.set_input_files("#facefiles", [png("happy.png", (255, 0, 0, 255)), png("notamood.png", (0, 0, 0, 255))])
@@ -156,8 +172,7 @@ with sync_playwright() as p:
     page.wait_for_selector(".thumbs img")
     page.wait_for_function("[...document.querySelectorAll('.thumbs img')].every(i=>i.complete&&i.naturalWidth>0)")
     check("the new pack is selected and its face shows up", requests.get(URL + "api/packs").json().get("zz-e2e-pack") == ["happy"] and page.locator(".thumbs img").count() == 1)
-    page.click("#facedelete")
-    page.wait_for_function("!document.querySelector('.thumbs')", timeout=8000)
+    click_until("#facedelete", lambda: page.locator(".thumbs").count() == 0)
     check("the pack can be deleted from the browser", "zz-e2e-pack" not in requests.get(URL + "api/packs").json())
 
     # ---------------------------------------------------------------- the older editor features still work
@@ -308,6 +323,27 @@ with sync_playwright() as p:
     page.wait_for_timeout(200)
     check("a bad address shows the reason instead of silently failing", "could not reach" in (page.locator("#msg").inner_text() if page.locator("#msg").count() else ""))
     page.unroute("**/api/nodes/add")
+
+    tab("Wardrive")
+    page.wait_for_timeout(200)
+    check("the Wardrive tab loads with no browser error, nothing tracked yet",
+          page.locator("p:has-text('No track yet')").count() == 1 and page.locator("button:text-is('Start wardrive')").count() == 1)
+    page.route("**/api/wardrive/start", lambda r: r.fulfill(
+        body=json.dumps({"ok": True, "active": True, "started_at": 1.0, "ended_at": None, "distance_m": 0,
+                          "duration_s": 0, "aps_seen": 0, "handshakes": 0, "points": []}), content_type="application/json"))
+    page.click("button:text-is('Start wardrive')")
+    page.wait_for_selector("button:text-is('Stop wardrive')")
+    check("starting flips the button and shows a waiting-for-fix message", page.locator("p:has-text('Waiting for a gps fix')").count() == 1)
+    page.unroute("**/api/wardrive/start")
+    page.route("**/api/wardrive/stop", lambda r: r.fulfill(
+        body=json.dumps({"ok": True, "active": False, "started_at": 1.0, "ended_at": 61.0, "distance_m": 1234,
+                          "duration_s": 60, "aps_seen": 3, "handshakes": 1, "points": [[52.0, 4.0], [52.01, 4.0]]}),
+        content_type="application/json"))
+    page.click("button:text-is('Stop wardrive')")
+    page.wait_for_selector("button:text-is('Start wardrive')")
+    check("stopping shows the trip summary (distance, duration, seen, handshakes)",
+          "1.23 km" in page.locator(".statcard").nth(0).inner_text() and "1" in page.locator(".statcard").nth(3).inner_text())
+    page.unroute("**/api/wardrive/stop")
 
     settings0 = requests.get(URL + "api/settings").json()
     tab("Settings")

@@ -773,6 +773,59 @@ def _gps_sidecar(path):
         return None
 
 
+# --------------------------------------------------------------------- wardrive: a start/stop trip log
+WARDRIVE_FILE = os.path.join(THEME_DIR, "wardrive.json")
+WARDRIVE_MAX_POINTS = 3000
+WARDRIVE_MIN_INTERVAL = 20    # seconds between logged points, even while moving fast
+WARDRIVE_MIN_MOVE_M = 15      # do not bother logging a new point until we have moved at least this far
+
+
+def _haversine_m(lat1, lon1, lat2, lon2):
+    """Great-circle distance between two lat/lon points, in meters."""
+    r = 6371000.0
+    p1, p2 = math.radians(lat1), math.radians(lat2)
+    dp, dl = math.radians(lat2 - lat1), math.radians(lon2 - lon1)
+    a = math.sin(dp / 2) ** 2 + math.cos(p1) * math.cos(p2) * math.sin(dl / 2) ** 2
+    return 2 * r * math.asin(min(1.0, math.sqrt(a)))
+
+
+def wardrive_distance_m(points):
+    return sum(_haversine_m(a["lat"], a["lon"], b["lat"], b["lon"]) for a, b in zip(points, points[1:]))
+
+
+def _fmt_dist_m(m):
+    return "%.2f km" % (m / 1000) if m >= 1000 else "%d m" % round(m)
+
+
+def _fmt_dur_s(s):
+    s = int(s)
+    h, rem = divmod(s, 3600)
+    m, sec = divmod(rem, 60)
+    parts = (["%dh" % h] if h else []) + (["%dm" % m] if h or m else []) + ["%ds" % sec]
+    return " ".join(parts)
+
+
+def _load_wardrive():
+    try:
+        with open(WARDRIVE_FILE) as fp:
+            data = json.load(fp)
+    except (OSError, ValueError):
+        return {"active": False, "started_at": None, "ended_at": None, "points": [], "aps_seen": [], "handshakes_start": 0}
+    if not isinstance(data, dict):
+        data = {}
+    pts = [p for p in data.get("points", []) if isinstance(p, dict) and isinstance(p.get("lat"), (int, float))
+           and isinstance(p.get("lon"), (int, float)) and isinstance(p.get("t"), (int, float))]
+    return {"active": bool(data.get("active")), "started_at": data.get("started_at"), "ended_at": data.get("ended_at"),
+            "points": pts[-WARDRIVE_MAX_POINTS:],
+            "aps_seen": [b for b in data.get("aps_seen", []) if isinstance(b, str)],
+            "handshakes_start": int(data.get("handshakes_start") or 0)}
+
+
+def _save_wardrive(state):
+    os.makedirs(THEME_DIR, exist_ok=True)
+    write_json(WARDRIVE_FILE, state)
+
+
 EAPOL_SIG = re.compile(rb"\x88\x8e[\x01\x02]\x03")   # EtherType 0x888e, EAPOL version 1 or 2, type 3 (EAPOL-Key)
 PMKID_KDE = b"\xdd\x14\x00\x0f\xac\x04"               # a vendor KDE carrying a PMKID (OUI 00:0f:ac, type 4)
 _quality_cache = {}
@@ -2238,7 +2291,7 @@ CONFIRM_S = 4.0          # a power button must be tapped twice within this time
 GPS_TOKENS = ("gps", "lat", "lon", "sats")
 STATUS_LINES = ("CPU {temp}  load {cpu}  RAM {mem}", "IP {ip}", "GPS {gps}  {lat} {lon}",
                 "Up {uptime}  Power {power}  Bat {battery}", "Pwned {handshakes}  Cracked {cracked}  Session {session}")
-TAB_NAMES = ("themes", "plugins", "system", "awards", "layout", "crack", "radar", "nodes")
+TAB_NAMES = ("themes", "plugins", "system", "awards", "layout", "crack", "radar", "nodes", "wardrive")
 TAB_WINDOW = 5      # tabs shown at once before it needs '<'/'>' to see the rest: as many as fit comfortably
 TAB_ARROW_W = 36
 PROTECTED_PLUGINS = ('theme_manager',)   # never listed: switching it off would remove the menu itself
@@ -2374,6 +2427,8 @@ def menu_hits(menu):
             x, y = radar_pos(r["angle"], radar_radius_frac(r["rssi"]))
             hits.append(((x - 15, y - 15, x + 15, y + 15), ("radarblip", r["mac"])))
         return hits + common
+    if tab == "wardrive":
+        return [((90, 220, 390, 264), ("wdtoggle", None))] + common
     act = {"themes": "pick", "awards": "award", "layout": "adjust", "crack": "crackrow", "nodes": "noderow"}.get(tab, "toggle")
     hits = [((28, 44 + i * 44, 452, 44 + i * 44 + 40), (act, n))
             for i, n in enumerate(menu_items(menu)[page * MENU_ROWS:(page + 1) * MENU_ROWS])]
@@ -2428,6 +2483,19 @@ def draw_radar(d, menu, bg, fg, acc, line):
     d.text((RADAR_CX, 50), text, font=_font(13, True), fill=fg, anchor="mm")
 
 
+def draw_wardrive(d, menu, fg, acc):
+    """Trip stats; the button itself is drawn generically in draw_menu's per-hit loop (act == "wdtoggle")."""
+    w = menu.get("wardrive") or {}
+    active = w.get("active", False)
+    lines = ["ACTIVE" if active else "stopped",
+             "Distance: %s" % _fmt_dist_m(w.get("distance_m", 0)),
+             "Duration: %s" % _fmt_dur_s(w.get("duration_s", 0)),
+             "Networks seen: %d" % w.get("aps_seen", 0),
+             "Handshakes: %d" % w.get("handshakes", 0)]
+    for i, text in enumerate(lines):
+        d.text((240, 46 + i * 26), text, font=_font(17, i == 0), fill=acc if i == 0 and active else fg, anchor="mm")
+
+
 def draw_menu(img, menu, theme):
     """Draw the menu (or the calibration prompt) onto an upright RGB frame."""
     d = ImageDraw.Draw(img)
@@ -2463,6 +2531,8 @@ def draw_menu(img, menu, theme):
             d.text((32, 46 + i * 24), text, font=_font(16), fill=fg)
     if tab == "radar":
         draw_radar(d, menu, bg, fg, acc, line)
+    if tab == "wardrive":
+        draw_wardrive(d, menu, fg, acc)
     for rect, (act, arg) in menu_hits(menu):
         x0, y0, x1, y1 = rect
         if act in ("mode", "power"):
@@ -2567,6 +2637,11 @@ def draw_menu(img, menu, theme):
             d.rectangle(rect, fill=acc if menu.get("nodes_scanning") else line, outline=acc, width=1)
             d.text(((x0 + x1) // 2, (y0 + y1) // 2), "scanning…" if menu.get("nodes_scanning") else "scan",
                    font=_font(14, True), fill=bg if menu.get("nodes_scanning") else fg, anchor="mm")
+        elif act == "wdtoggle":
+            active = (menu.get("wardrive") or {}).get("active", False)
+            d.rounded_rectangle(rect, 10, fill=acc if active else line, outline=acc, width=2)
+            d.text(((x0 + x1) // 2, (y0 + y1) // 2), "STOP" if active else "START WARDRIVE",
+                   font=_font(16, True), fill=bg if active else fg, anchor="mm")
         elif act == "toggle":
             busy, on, bad = arg in menu["busy"], arg in menu["on"], arg in menu.get("failed", ())
             d.rectangle(rect, fill=line, outline=acc if on else line, width=2)
@@ -2668,15 +2743,17 @@ ATTACK_MODES = ("aggressive", "passive", "home")
 
 def clean_settings(cfg):
     """Validated settings: whether an overheating Pi turns itself off (and at what temperature, after how long),
-    achievements, and the attack mode (aggressive: unchanged; passive: deauth/associate off; home: the same, plus a
-    watch for a new device broadcasting one of your whitelisted network names)."""
+    achievements, the attack mode (aggressive: unchanged; passive: deauth/associate off; home: the same, plus a
+    watch for a new device broadcasting one of your whitelisted network names), and whether a paired node's already-
+    captured networks are actually skipped rather than just shown covered on the Radar."""
     if not isinstance(cfg, dict):
         raise ValueError("settings must be a JSON object")
     return {"overheat_off": bool(cfg.get("overheat_off", False)),
             "overheat_temp": _num(cfg.get("overheat_temp", 85), 70, 95, "overheat_temp"),
             "overheat_seconds": _num(cfg.get("overheat_seconds", 60), 10, 600, "overheat_seconds"),
             "achievements": bool(cfg.get("achievements", True)),
-            "mode": cfg.get("mode") if cfg.get("mode") in ATTACK_MODES else "aggressive"}
+            "mode": cfg.get("mode") if cfg.get("mode") in ATTACK_MODES else "aggressive",
+            "node_skip_captured": bool(cfg.get("node_skip_captured", False))}
 
 
 def _clock(value, what):
@@ -2822,7 +2899,7 @@ def _pwa_icon(size, theme):
 
 class ThemeManager(plugins.Plugin):
     __author__ = "theme_manager contributors"
-    __version__ = "2.15.0"
+    __version__ = "2.16.0"
     __license__ = "GPL3"
     __description__ = "Theme engine for the 3.5 inch display: colors, effects, animations, custom text, web GUI."
 
@@ -2841,6 +2918,14 @@ class ThemeManager(plugins.Plugin):
         self._menu_lock = threading.Lock()
         self._gps = None
         self._gps_wanted = 0
+        wd = _load_wardrive()
+        self._wd_lock = threading.Lock()
+        self._wd_active = wd["active"]
+        self._wd_started_at = wd["started_at"]
+        self._wd_ended_at = wd["ended_at"]
+        self._wd_points = wd["points"]
+        self._wd_aps_seen = set(wd["aps_seen"])
+        self._wd_handshakes_start = wd["handshakes_start"]
         self._toast = None
         self._notice = None
         self._mode_saved = None
@@ -2851,6 +2936,7 @@ class ThemeManager(plugins.Plugin):
         self._nodes_found = []
         self._nodes_paired = _load_nodes()
         self._nodes_lock = threading.Lock()
+        self._node_whitelist_added = set()
         self._ach = clean_achievements(None)
         self._ach_lock = threading.Lock()
         self._ach_dirty = False
@@ -2881,6 +2967,7 @@ class ThemeManager(plugins.Plugin):
         self._next_guard = 0
         self._gps_waiting = None
         self._gps_evt = threading.Event()
+        self._node_skip_evt = threading.Event()
         self._touch_m = None
         self._last_tap = None
         self._down = None
@@ -3191,6 +3278,8 @@ class ThemeManager(plugins.Plugin):
                 self._sync_crack_menu(menu)
             elif menu.get("tab") == "radar" and menu["mode"] == "list":
                 self._sync_radar_menu(menu)
+            elif menu.get("tab") == "wardrive" and menu["mode"] == "list":
+                self._sync_wardrive_menu(menu)
             menu["t"] = t
             draw_menu(img, menu, self._theme)
         toast = self._toast
@@ -3265,7 +3354,7 @@ class ThemeManager(plugins.Plugin):
                           "pages": {t: 0 for t in TAB_NAMES}, "confirm": None, "awards_on": self._settings["achievements"],
                           "awards": [a[0] for a in ACHIEVEMENTS] if self._settings["achievements"] else [], "layout": [], "layout_info": {},
                           "crack": [], "crack_info": {}, "radar": [], "nodes": [], "nodes_info": {}, "nodes_scanning": False,
-                          "award_info": {r["id"]: r for r in self.award_rows()}, "plugins": self._plugin_names(),
+                          "wardrive": {}, "award_info": {r["id"]: r for r in self.award_rows()}, "plugins": self._plugin_names(),
                           "on": set(plugins.loaded), "busy": set(), "failed": set(), "step": 0, "raw": [], "names": list(themes),
                           "colors": {n: t for n, t in themes.items()}, "active": self._active,
                           "until": now + (CALIB_TIMEOUT if mode == "calib" else MENU_TIMEOUT)}
@@ -3273,12 +3362,16 @@ class ThemeManager(plugins.Plugin):
         self._sync_crack_menu(self._menu)
         self._sync_radar_menu(self._menu)
         self._sync_nodes_menu(self._menu)
+        self._sync_wardrive_menu(self._menu)
         self._wake.set()
         self._refresh_now()
 
     def _sync_radar_menu(self, menu):
         rows, _ = self.radar_rows()
         menu["radar"] = rows
+
+    def _sync_wardrive_menu(self, menu):
+        menu["wardrive"] = self.wardrive_status()
 
     def _sync_nodes_menu(self, menu):
         paired, found = self.node_rows()
@@ -3474,6 +3567,7 @@ class ThemeManager(plugins.Plugin):
         if not cfg["overheat_off"]:
             self._hot_since = self._shutdown_at = 0
         self._apply_mode()
+        self._sync_node_whitelist()
 
     def save_settings(self, cfg):
         """Validate and store new settings (the web editor and the touch menu use this)."""
@@ -3486,6 +3580,7 @@ class ThemeManager(plugins.Plugin):
         if not self._settings["overheat_off"]:
             self._hot_since = self._shutdown_at = 0
         self._apply_mode()
+        self._sync_node_whitelist()
         return self._settings
 
     def _cycle_atkmode(self):
@@ -3497,7 +3592,8 @@ class ThemeManager(plugins.Plugin):
     def _apply_mode(self):
         """Push the attack mode into pwnagotchi's own live config: passive and home turn deauth/associate off (takes
         effect immediately, no restart); aggressive restores whatever the user's config.toml said. Display-only
-        features elsewhere (like the old radar) never touched this; this is the one place that actually does."""
+        features elsewhere (like the Radar) never touch this; this and _sync_node_whitelist are the only two that
+        actually do."""
         try:
             p = self._view._agent.config()["personality"]
         except Exception:
@@ -3509,6 +3605,49 @@ class ThemeManager(plugins.Plugin):
         elif self._mode_saved is None:
             self._mode_saved = (p.get("deauth", True), p.get("associate", True))
             p["deauth"] = p["associate"] = False
+
+    def _sync_node_whitelist(self):
+        """Opt-in (Settings: "skip networks a node already has"), off by default. When on, a network a paired,
+        *online* node has already captured gets added to pwnagotchi's own live whitelist -- the same mechanism you'd
+        use to protect your own network, which get_access_points() checks before an AP is even offered to the
+        associate/deauth decision, covering both in one place. In memory only, like the attack modes: never written
+        to config.toml, and this only ever adds or removes the entries it itself added, tracked in
+        self._node_whitelist_added, so your own whitelist lines are never touched. Recomputed from scratch every
+        call, so turning this off, unpairing a node, or it simply going offline all clean up automatically."""
+        try:
+            wl = self._view._agent.config()["main"]["whitelist"]
+        except Exception:
+            return
+        if not isinstance(wl, list):
+            return
+        want = set()
+        if self._settings.get("node_skip_captured"):
+            for bare in self.all_node_bssids():
+                if BSSID_HEX.fullmatch(bare):
+                    want.add(":".join(bare[i:i + 2] for i in range(0, 12, 2)))
+        for mac in self._node_whitelist_added - want:
+            try:
+                wl.remove(mac)
+            except ValueError:
+                pass
+        for mac in want - self._node_whitelist_added:
+            if mac not in wl:
+                wl.append(mac)
+        self._node_whitelist_added = want
+
+    def _node_skip_loop(self):
+        """Keeps the live whitelist (see _sync_node_whitelist) fresh on its own, so a node coming into or drifting
+        out of mesh range takes effect without needing the Nodes tab open. A no-op, cheap check when the setting is
+        off or nothing is paired."""
+        while self._running:
+            self._node_skip_evt.wait(30)
+            self._node_skip_evt.clear()
+            if not self._settings.get("node_skip_captured") or not self._nodes_paired:
+                continue
+            try:
+                self.refresh_paired_nodes()   # also resyncs the whitelist, now that online/offline may have changed
+            except Exception as e:
+                logging.debug("[theme_manager] node skip-list refresh: %s", e)
 
     def _load_home_watch(self):
         try:
@@ -3526,10 +3665,12 @@ class ThemeManager(plugins.Plugin):
             logging.debug("[theme_manager] could not save home_watch.json: %s", e)
 
     def on_wifi_update(self, agent, access_points):
-        """pwnagotchi calls this with every network it currently sees. We only ever read it, for the Radar tab and
-        (in Home Defense mode) a rogue-AP watch; nothing here feeds back into what gets attacked."""
+        """pwnagotchi calls this with every network it currently sees. We only ever read it, for the Radar tab,
+        (in Home Defense mode) a rogue-AP watch, and (while a wardrive is running) counting unique networks seen;
+        nothing here feeds back into what gets attacked."""
         self._update_radar(access_points)
         self._home_defense_check(agent, access_points)
+        self._wardrive_seen(access_points)
 
     def _update_radar(self, access_points):
         """A snapshot for the sonar radar: display only, capped, sorted best first. A network already captured by
@@ -3584,6 +3725,7 @@ class ThemeManager(plugins.Plugin):
             self._nodes_paired[mac] = dict(info, last_seen=time.time(), online=True)
             paired = dict(self._nodes_paired)
         _save_nodes(paired)
+        self._sync_node_whitelist()
         return True
 
     def add_node(self, host):
@@ -3601,6 +3743,7 @@ class ThemeManager(plugins.Plugin):
             self._nodes_paired[info["mac"]] = dict(info, via="ip", last_seen=time.time(), online=True)
             paired = dict(self._nodes_paired)
         _save_nodes(paired)
+        self._sync_node_whitelist()
         return True, info["name"]
 
     def unpair_node(self, mac):
@@ -3609,6 +3752,7 @@ class ThemeManager(plugins.Plugin):
             paired = dict(self._nodes_paired)
         if existed:
             _save_nodes(paired)
+            self._sync_node_whitelist()
         return existed
 
     def refresh_paired_nodes(self):
@@ -3631,6 +3775,7 @@ class ThemeManager(plugins.Plugin):
         with self._nodes_lock:
             paired = dict(self._nodes_paired)
         _save_nodes(paired)
+        self._sync_node_whitelist()
 
     def node_rows(self):
         """(paired nodes, freshly-found-but-not-yet-paired nodes). "found" merges the last explicit subnet scan
@@ -3968,6 +4113,16 @@ class ThemeManager(plugins.Plugin):
                         menu["nodes_scanning"] = True
                         threading.Thread(target=self._scan_nodes_bg, args=(menu,), daemon=True, name="theme-nodescan").start()
                     return
+                elif act == "wdtoggle":
+                    if (menu.get("wardrive") or {}).get("active", False):
+                        self.stop_wardrive()
+                        self.toast("wardrive stopped", seconds=3, now=now)
+                    else:
+                        self.start_wardrive()
+                        self.toast("wardrive started", seconds=3, now=now)
+                    self._sync_wardrive_menu(menu)
+                    self._refresh_now()
+                    return
                 elif act == "cal":
                     menu.update(mode="calib", step=0, raw=[])
                     menu["until"] = now + CALIB_TIMEOUT
@@ -4155,15 +4310,96 @@ class ThemeManager(plugins.Plugin):
 
     def _gps_loop(self):
         while self._running:
-            if time.time() - self._gps_wanted < 60:
+            if time.time() - self._gps_wanted < 60 or self._wd_active:
                 try:
                     sess = self._view._agent.session()
                     self._gps = sess.get("gps") if isinstance(sess, dict) else None
                 except Exception:
                     self._gps = None
                     self._gps_evt.wait(25)
+                if self._wd_active:
+                    self._wardrive_tick()
             self._gps_evt.wait(5)
             self._gps_evt.clear()
+
+    # ---- wardrive: a start/stop trip log (breadcrumb trail, distance, aps seen, handshakes captured)
+    def _save_wardrive_state(self):
+        with self._wd_lock:
+            state = {"active": self._wd_active, "started_at": self._wd_started_at, "ended_at": self._wd_ended_at,
+                     "points": list(self._wd_points), "aps_seen": list(self._wd_aps_seen),
+                     "handshakes_start": self._wd_handshakes_start}
+        _save_wardrive(state)
+
+    def start_wardrive(self):
+        with self._wd_lock:
+            self._wd_active = True
+            self._wd_started_at = time.time()
+            self._wd_ended_at = None
+            self._wd_points = []
+            self._wd_aps_seen = set()
+            try:
+                self._wd_handshakes_start = int(_count_handshakes())
+            except (OSError, ValueError):
+                self._wd_handshakes_start = 0
+        self._gps_wanted = time.time()
+        self._gps_evt.set()   # do not wait up to 5s for the first point
+        self._save_wardrive_state()
+
+    def stop_wardrive(self):
+        with self._wd_lock:
+            if not self._wd_active:
+                return False
+            self._wd_active = False
+            self._wd_ended_at = time.time()
+        self._save_wardrive_state()
+        return True
+
+    def wardrive_status(self):
+        with self._wd_lock:
+            points = list(self._wd_points)
+            active, started, ended = self._wd_active, self._wd_started_at, self._wd_ended_at
+            aps_seen, hs_start = len(self._wd_aps_seen), self._wd_handshakes_start
+        try:
+            handshakes = max(0, int(_count_handshakes()) - hs_start) if started else 0
+        except (OSError, ValueError):
+            handshakes = 0
+        duration = ((ended if ended else time.time()) - started) if started else 0
+        return {"active": active, "started_at": started, "ended_at": ended, "distance_m": round(wardrive_distance_m(points)),
+                "duration_s": round(duration), "aps_seen": aps_seen, "handshakes": handshakes,
+                "points": [[p["lat"], p["lon"]] for p in points]}
+
+    def _wardrive_seen(self, access_points):
+        if not self._wd_active:
+            return
+        with self._wd_lock:
+            for ap in access_points:
+                bare = (ap.get("mac") or "").lower().replace(":", "")
+                if bare:
+                    self._wd_aps_seen.add(bare)
+
+    def _wardrive_tick(self):
+        """Log a breadcrumb point if we have a real fix and have moved (or waited) far/long enough since the last
+        one -- called from the gps loop, which already just refreshed self._gps."""
+        g = self._gps
+        if not g:
+            return
+        try:
+            lat, lon = float(g.get("Latitude") or 0), float(g.get("Longitude") or 0)
+        except (TypeError, ValueError):
+            return
+        if not (lat or lon) or str(g.get("FixQuality", "1")) in ("0", ""):
+            return
+        now = time.time()
+        with self._wd_lock:
+            if not self._wd_active:
+                return
+            if self._wd_points:
+                last = self._wd_points[-1]
+                if now - last["t"] < WARDRIVE_MIN_INTERVAL or _haversine_m(last["lat"], last["lon"], lat, lon) < WARDRIVE_MIN_MOVE_M:
+                    return
+            self._wd_points.append({"lat": lat, "lon": lon, "t": now})
+            self._wd_points = self._wd_points[-WARDRIVE_MAX_POINTS:]
+        self._save_wardrive_state()
 
     def _forget_enabled(self, name):
         """toggle_plugin marks a plugin enabled before loading it. If it could not load, don't leave that in config.toml."""
@@ -4302,7 +4538,7 @@ class ThemeManager(plugins.Plugin):
             theme = self._current(start)
             busy = self._trans is not None or start < self._event_until + 0.3 or start < self._force[1] + 0.3
             m = self._menu
-            live_menu = m is not None and m.get("tab") in ("system", "radar") and m["mode"] == "list"
+            live_menu = m is not None and m.get("tab") in ("system", "radar", "wardrive") and m["mode"] == "list"
             animate = busy or live_menu or self._face_multi or is_animated(theme)
             if self._heat is None and not live_menu:      # too hot: only redraw when the UI itself changes
                 animate = False
@@ -4429,6 +4665,7 @@ class ThemeManager(plugins.Plugin):
         global STAT_SOURCE
         STAT_SOURCE = self._live_stat
         threading.Thread(target=self._gps_loop, daemon=True, name="theme-gps").start()
+        threading.Thread(target=self._node_skip_loop, daemon=True, name="theme-nodeskip").start()
         dev = find_touch_device()
         if dev:
             self._load_touch()
@@ -4529,6 +4766,9 @@ class ThemeManager(plugins.Plugin):
         if path == "api/nodes" and request.method != "POST":
             paired, found = self.node_rows()
             return jsonify({"paired": paired, "found": found})
+
+        if path == "api/wardrive" and request.method != "POST":
+            return jsonify(self.wardrive_status())
 
         if path == "api/locations":
             rows = [r for r in crack_rows() if r.get("loc")]
@@ -4671,6 +4911,12 @@ class ThemeManager(plugins.Plugin):
                     ok_ = self.unpair_node(str(data.get("mac", "")))
                     paired, found = self.node_rows()
                     return jsonify({"ok": ok_, "paired": paired, "found": found})
+                if path == "api/wardrive/start":
+                    self.start_wardrive()
+                    return jsonify(dict(self.wardrive_status(), ok=True))
+                if path == "api/wardrive/stop":
+                    self.stop_wardrive()
+                    return jsonify(dict(self.wardrive_status(), ok=True))
                 if path == "api/faces/delete":
                     return jsonify({"ok": delete_pack(data.get("pack", ""))})
                 if path == "api/try":
@@ -4812,7 +5058,7 @@ const KINDS=SCENE_KINDS_JS;
 const ANIM=['pulse','rainbow','glitch','rain','stars','noise'];
 const MOODS=['look_r','sleep','awake','bored','intense','cool','happy','grateful','excited','motivated','demotivated','smart','lonely','sad','angry','friend','broken','debug','upload','handshake'];
 const HOLDERS=['{name}','{time}','{date}','{cpu}','{temp}','{mem}','{uptime}','{ip}','{mode}','{gps}','{lat}','{lon}','{sats}','{handshakes}','{cracked}','{session}','{power}','{battery}'];
-const TABS=['Colors','Effects','Text','Elements','Moods','Faces','JSON','Layout','Awards','Cracking','Radar','Map','Nodes','Settings'];
+const TABS=['Colors','Effects','Text','Elements','Moods','Faces','JSON','Layout','Awards','Cracking','Radar','Map','Nodes','Wardrive','Settings'];
 let S={active:'',themes:{}},sel='',cur={},info={elements:[],entities:[],packs:{}},tab='Colors',mood='sad',pvMood=null,busy=false,dirty=false,pvErr=false,timer=null;
 const say=t=>$('msg').textContent=t||'';
 /* After the plugin restarts (or the browser loses its session) the page's token is stale: fetch a fresh one and retry once. */
@@ -5096,6 +5342,35 @@ function panelMap(){const p=E('div'),count=locations.rows.length;
    E('span',{class:'inh',style:'flex:1'},r.status==='cracked'?r.password:r.status),
    E('a',{href:'https://www.openstreetmap.org/?mlat='+r.lat+'&mlon='+r.lon+'#map=17/'+r.lat+'/'+r.lon,target:'_blank',style:'font-size:11px;color:var(--acc)'},'open')))}
  return p}
+let wardrive={active:false,started_at:null,ended_at:null,distance_m:0,duration_s:0,aps_seen:0,handshakes:0,points:[]};
+async function loadWardrive(){try{wardrive=await(await fetch(base+'/api/wardrive')).json()}catch(e){}}
+const fmtDist=m=>m>=1000?(m/1000).toFixed(2)+' km':Math.round(m)+' m';
+const fmtDur=s=>{const h=Math.floor(s/3600),m=Math.floor((s%3600)/60),ss=Math.round(s%60);return(h?h+'h ':'')+(h||m?m+'m ':'')+ss+'s'};
+function panelWardrive(){const p=E('div'),w=wardrive;
+ p.append(E('p',{style:'color:var(--dim);margin:0 0 10px'},'A start/stop trip log: a breadcrumb trail from the gps plugin, plus distance, unique networks seen and handshakes captured while it runs. Display and bookkeeping only — it never changes what gets attacked.'));
+ const btn=E('button',{onclick:async()=>{btn.disabled=true;
+  try{wardrive=await(await post(w.active?'wardrive/stop':'wardrive/start',{})).json()}catch(e){}
+  finally{btn.disabled=false;panel()}}},w.active?'Stop wardrive':'Start wardrive');
+ p.append(btn);
+ p.append(E('div',{class:'wpa-stats',style:'display:grid;grid-template-columns:repeat(auto-fit,minmax(90px,1fr));gap:8px;margin:12px 0'},
+  [[fmtDist(w.distance_m),'Distance'],[fmtDur(w.duration_s),'Duration'],[String(w.aps_seen),'Seen'],[String(w.handshakes),'Handshakes']].map(([v,l])=>
+   E('div',{class:'statcard',style:'text-align:center;cursor:default;background:var(--panel);border:1px solid var(--line);border-radius:8px;padding:8px'},
+    E('div',{style:'font-size:20px'},v),E('small',{style:'color:var(--dim)'},l)))));
+ if(!w.points.length){p.append(E('p',{style:'color:var(--dim)'},w.active?'Waiting for a gps fix…':'No track yet: start a wardrive to log one.'));return p}
+ const div=E('div',{id:'wdmap',style:'height:320px;border-radius:8px;border:1px solid var(--line);background:var(--panel)'});
+ const status=E('p',{style:'color:var(--dim)'},'Loading map…');
+ p.append(div,status);
+ loadLeaflet().then(()=>{
+  if(tab!=='Wardrive')return;
+  status.remove();
+  const map=L.map(div);
+  L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png',{attribution:'&copy; OpenStreetMap contributors',maxZoom:19}).addTo(map);
+  const line=L.polyline(w.points,{color:getComputedStyle(document.documentElement).getPropertyValue('--acc').trim()}).addTo(map);
+  L.circleMarker(w.points[w.points.length-1],{radius:6,color:'#2ecc71'}).addTo(map);
+  map.fitBounds(line.getBounds(),{padding:[20,20],maxZoom:17})
+ }).catch(()=>{status.textContent='Could not load the map (no internet in this browser?). The stats above still work.'});
+ if(w.active)setTimeout(async()=>{if(tab!=='Wardrive')return;await loadWardrive();panel()},10000);
+ return p}
 let nodes={paired:[],found:[]},nodesScanning=false;
 async function loadNodes(){try{nodes=await(await fetch(base+'/api/nodes')).json()}catch(e){}}
 const nodeWhere=n=>n.ip?n.ip:('mesh'+(n.rssi!=null?', '+n.rssi+' dBm':''));
@@ -5134,6 +5409,8 @@ function panelSettings(){const p=E('div'),s=cfg.settings,d=cfg.display;
  p.append(E('h2',{},'Attack mode'),E('div',{class:'row'},
   select([['aggressive','Aggressive (normal)'],['passive','Passive recon'],['home','Home defense']],s.mode||'aggressive',v=>{s.mode=v})),
   E('p',{style:'color:var(--dim);margin:6px 0 14px'},'Aggressive is normal pwnagotchi behavior. Passive turns deauth and association off right away, no restart needed; Aggressive puts them back. Home defense does the same as Passive, and also watches for a new device broadcasting one of the network names in your whitelist, a common sign of a rogue access point.'));
+ p.append(E('div',{class:'row'},check('skip networks a paired node already has',s.node_skip_captured,on=>{s.node_skip_captured=on})),
+  E('p',{style:'color:var(--dim);margin:6px 0 14px'},'Off by default. On, a network a paired, online node (Nodes tab) already captured is added to pwnagotchi’s own whitelist for as long as that stays true, so this unit genuinely skips it instead of just showing it covered on the Radar — the same live, no-restart-needed mechanism as the attack mode above. It never touches whitelist entries you added yourself, and cleans up the moment a node is unpaired, goes offline, or this is switched off again.'));
  p.append(E('h2',{},'Overheating'),E('div',{class:'row'},
   check('switch the Pi off when it stays too hot',s.overheat_off,on=>{s.overheat_off=on;panel()}),
   field('above (°C)',num(s.overheat_temp,v=>s.overheat_temp=v,70,95)),
@@ -5150,9 +5427,9 @@ function panelSettings(){const p=E('div'),s=cfg.settings,d=cfg.display;
   idleOn?[field('after (minutes)',num(d.idle.minutes,v=>d.idle.minutes=v,1,240)),slider('dim to',[5,100,5],Math.round(d.idle.dim*100),v=>{d.idle.dim=v/100})]:null));
  p.append(E('div',{class:'row'},E('button',{id:'setsave',onclick:saveSettings},'Save settings')));
  return p}
-const PANELS={Colors:panelColors,Effects:panelEffects,Text:panelText,Elements:panelElements,Moods:panelMoods,Faces:panelFaces,JSON:panelJson,Layout:panelLayout,Awards:panelAwards,Cracking:panelCracking,Radar:panelRadar,Map:panelMap,Nodes:panelNodes,Settings:panelSettings};
+const PANELS={Colors:panelColors,Effects:panelEffects,Text:panelText,Elements:panelElements,Moods:panelMoods,Faces:panelFaces,JSON:panelJson,Layout:panelLayout,Awards:panelAwards,Cracking:panelCracking,Radar:panelRadar,Map:panelMap,Nodes:panelNodes,Wardrive:panelWardrive,Settings:panelSettings};
 function panel(){const p=$('panel');p.innerHTML='';p.append(PANELS[tab]());
- const t=$('tabs');t.innerHTML='';for(const n of TABS)t.append(E('button',{class:n===tab?'on':'',onclick:async()=>{tab=n;pickKey=null;$('pick').innerHTML='';$('pick').className='';pvMood=n==='Moods'?mood:null;if(n==='Elements'||n==='Moods'){try{info.entities=await(await fetch(base+'/api/entities')).json()}catch(e){}}if(n==='Layout')await loadLayout();if(n==='Awards')await loadAwards();if(n==='Cracking')await loadCracking();if(n==='Radar')await loadRadar();if(n==='Map')await loadLocations();if(n==='Nodes')await loadNodes();if(n==='Settings')await loadSettings();panel();overlay();schedule()}},n))}
+ const t=$('tabs');t.innerHTML='';for(const n of TABS)t.append(E('button',{class:n===tab?'on':'',onclick:async()=>{tab=n;pickKey=null;$('pick').innerHTML='';$('pick').className='';pvMood=n==='Moods'?mood:null;if(n==='Elements'||n==='Moods'){try{info.entities=await(await fetch(base+'/api/entities')).json()}catch(e){}}if(n==='Layout')await loadLayout();if(n==='Awards')await loadAwards();if(n==='Cracking')await loadCracking();if(n==='Radar')await loadRadar();if(n==='Map')await loadLocations();if(n==='Nodes')await loadNodes();if(n==='Wardrive')await loadWardrive();if(n==='Settings')await loadSettings();panel();overlay();schedule()}},n))}
 
 /* ---- drag text lines on the preview ---- */
 const est=t=>(t||'').replace(/\{time\}/g,'00:00:00').replace(/\{date\}/g,'0000-00-00').replace(/\{\w+\}/g,'0000').length;

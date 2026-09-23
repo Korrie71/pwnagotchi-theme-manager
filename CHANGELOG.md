@@ -1,5 +1,23 @@
 # Changelog
 
+## 2.16.0
+
+**Wardrive.** A new start/stop trip log: a breadcrumb trail from the gps plugin, plus distance, unique networks
+seen and handshakes captured while it runs. Start it before heading out, stop it when you are done, and the web
+editor's new Wardrive tab shows the route on an OpenStreetMap map (the same lazy-loaded Leaflet as the GPS Map tab)
+alongside the summary. The touch menu gets its own new **Wardrive** tab too -- one `START WARDRIVE` / `STOP` button,
+with the same live distance, duration, networks-seen and handshake counts ticking while it's open. Purely a log --
+like everything else in this plugin, it never influences what pwnagotchi decides to attack.
+
+**Nodes can actually skip a teammate's networks now.** Until now, a paired node's captures only showed as "already
+covered" on the Radar -- advisory, never enforced. A new, **off by default** Settings toggle ("skip networks a
+paired node already has") makes it real: while on, a network a paired, *online* node has already captured is added
+to pwnagotchi's own live whitelist -- the same mechanism you would use to protect your own network, checked before
+an access point is even offered to the associate/deauth decision, and the exact same "change it live, no restart,
+never touch the user's own entries, clean up automatically" approach the attack modes already use. This is only the
+second thing in the whole plugin that actually changes what pwnagotchi does (the attack modes are the first); the
+Radar and everything else remain pure display.
+
 ## 2.15.0
 
 **Nodes find each other over WiFi directly now, no network at all.** `node_pwn` advertises this unit's identity and

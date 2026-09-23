@@ -38,7 +38,8 @@ with pwnagotchi's mood. Themes are small JSON files you can edit in a web editor
 - **Sonar radar:** a rotating sweep showing nearby networks as blips (distance = signal strength, a stable bearing per device); tap one for details. Display-only, never affects what gets attacked
 - **Cracking dashboard:** every captured handshake with its upload/crack status, a local handshake-quality guess (full/PMKID/partial/junk), and its location if pwnagotchi’s gps plugin has one, on the screen and in the editor
 - **GPS map:** an OpenStreetMap view of your own captured handshakes in the web editor, with a plain-list fallback if the map tiles cannot load
-- **Nodes:** pair with other units (a Pi Zero W running the small `node_pwn.py` companion) so a group covers more distinct ground instead of each attacking the same network twice. One in WiFi range shows up on its own over pwnagotchi's own mesh — no shared network needed at all; failing that, scan the local network, or add one directly by address (a VPN, or a forwarded port) from the web editor. A paired node's captures mark a network as already covered on the Radar
+- **Nodes:** pair with other units (a Pi Zero W running the small `node_pwn.py` companion) so a group covers more distinct ground instead of each attacking the same network twice. One in WiFi range shows up on its own over pwnagotchi's own mesh — no shared network needed at all; failing that, scan the local network, or add one directly by address (a VPN, or a forwarded port) from the web editor. A paired node's captures mark a network as already covered on the Radar, and can optionally (off by default) actually be skipped, not just shown covered
+- **Wardrive:** a start/stop trip log — a gps breadcrumb trail, distance, unique networks seen and handshakes captured, shown on an OpenStreetMap route in the web editor
 - **Move anything on the screen:** tap an element in the touch menu and nudge it with small `+` and `-` buttons (or do it in the web editor)
 - **Achievements:** unlock them for handshakes, uptime, themes tried and more, on the screen and in the editor
 - **Overheating auto-off (optional):** a countdown on the screen, then the Pi shuts itself down; a touch cancels it
@@ -82,6 +83,7 @@ And more, each with its own scenery: a Star Trek console, the seasons, landscape
 <p>
 <img src="docs/images/menu-radar.png" width="32%" alt="Radar tab, a sonar-style sweep of nearby networks">
 <img src="docs/images/menu-nodes.png" width="32%" alt="Nodes tab, other units on the network">
+<img src="docs/images/menu-wardrive.png" width="32%" alt="Wardrive tab, a trip in progress">
 </p>
 
 **Web editor** with a live preview: drag text lines on the preview, or click a part of the screen to recolor it.
@@ -181,8 +183,8 @@ you have forwarded to it) for one that is neither in mesh range nor on this netw
 
 **Web editor:** open `http://<pi-address>:8080/plugins/theme_manager/`. Pick a theme, change colors and effects, drag text
 lines on the preview, click a part of the screen to recolor it, then **Apply to screen**. Themes you save appear in the list.
-The **Layout**, **Awards**, **Cracking**, **Radar**, **Map**, **Nodes** and **Settings** tabs (overheating auto-off,
-achievements, brightness and night mode) are about the device rather than the theme.
+The **Layout**, **Awards**, **Cracking**, **Radar**, **Map**, **Nodes**, **Wardrive** and **Settings** tabs
+(overheating auto-off, achievements, brightness and night mode) are about the device rather than the theme.
 
 **Command line** (use pwnagotchi's Python):
 
@@ -212,7 +214,8 @@ $P mode                  # show the attack mode (or: mode passive / mode home)
 | **Layout** | every element on the screen; tap one to move it with `X -` `X +` `Y -` `Y +` (1, 5 or 10 pixels per tap), `reset` and `done`; `clear` puts everything back |
 | **Crack** | every captured handshake with a status pill (`PWND`/`WAIT`/`NEW`/`BAD`/`?`); tap one for the password, quality guess, or location if it has one |
 | **Radar** | a rotating sonar sweep of nearby networks; tap a blip for its name, encryption, client count, signal, and whether you already have its handshake. Display-only — it never affects what pwnagotchi attacks |
-| **Nodes** | other units running `node_pwn`; one in WiFi range shows up here on its own, over pwnagotchi's own mesh (no shared network needed). `scan` also checks the local network. Tap a found one to pair, tap a paired one and tap again to unpair. Shows name, address (or signal, for a mesh find), handshake count and online/offline. A node that is neither in mesh range nor on this network can be added by address instead, from the web editor's Nodes tab (no keyboard here to type one with) |
+| **Nodes** | other units running `node_pwn`; one in WiFi range shows up here on its own, over pwnagotchi's own mesh (no shared network needed). `scan` also checks the local network. Tap a found one to pair, tap a paired one and tap again to unpair. Shows name, address (or signal, for a mesh find), handshake count and online/offline. A node that is neither in mesh range nor on this network can be added by address instead, from the web editor's Nodes tab (no keyboard here to type one with). The web editor's Settings tab has an off-by-default switch to actually skip a network a paired, online node already captured, not just show it covered on the Radar |
+| **Wardrive** | one button: `START WARDRIVE` / `STOP`. While active, shows distance, duration, unique networks seen and handshakes captured since the trip started. The gps breadcrumb trail and route map live in the web editor's Wardrive tab; this is display-only and never affects what pwnagotchi attacks |
 
 Swipe sideways on the bare screen to change theme. `close`, a tap outside the menu, or 20 seconds of nothing closes it. It costs nothing while idle: one thread sleeps until
 the screen is touched.

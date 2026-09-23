@@ -135,4 +135,17 @@ ok("nodes: out of range, it is offline rather than gone", j["paired"][0]["online
 call("api/nodes/unpair", {"mac": "02:00:00:00:00:0b"})
 T._mesh_peers = real_mesh
 
+# ---------------------------------------------------------------- wardrive over the web API
+code, j = call("api/wardrive")
+ok("wardrive: not active before it is started", code == 200 and j["active"] is False)
+code, j = call("api/wardrive/start", {})
+ok("wardrive: starting it works and answers with the fresh status", code == 200 and j["ok"] and j["active"] and j["points"] == [])
+tm._gps = {"Latitude": 52.0, "Longitude": 4.0, "FixQuality": "1"}
+tm._wardrive_tick()
+code, j = call("api/wardrive")
+ok("wardrive: a logged point shows up as [lat, lon] pairs", j["points"] == [[52.0, 4.0]])
+code, j = call("api/wardrive/stop", {})
+ok("wardrive: stopping it works", code == 200 and j["ok"] and j["active"] is False)
+tm._gps = None
+
 finish()

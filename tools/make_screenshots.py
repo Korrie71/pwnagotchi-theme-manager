@@ -104,10 +104,14 @@ nodes_info = {
     "f:02:00:00:00:00:13": {"kind": "found", "mac": "02:00:00:00:00:13", "name": "zero-w-new", "ip": "192.0.2.12:8080", "handshakes": 7},
 }
 menu.update(nodes=list(nodes_info), nodes_info=nodes_info, nodes_scanning=False)
+# a wardrive trip in progress, with made-up stats (never a real track)
+wardrive_stats = {"active": True, "distance_m": 2350, "duration_s": 1830, "aps_seen": 14, "handshakes": 3}
+menu.update(wardrive=wardrive_stats)
 for name, extra in (("menu-themes.png", {"tab": "themes", "page": 1}), ("menu-plugins.png", {"tab": "plugins", "busy": {"bt-tether"}}),
                     ("menu-system.png", {"tab": "system", "overheat": True, "atkmode": "home"}), ("menu-awards.png", {"tab": "awards"}),
                     ("menu-layout.png", {"tab": "layout", "page": 1}), ("menu-crack.png", {"tab": "crack"}),
                     ("menu-radar.png", {"tab": "radar"}), ("menu-nodes.png", {"tab": "nodes"}),
+                    ("menu-wardrive.png", {"tab": "wardrive"}),
                     ("menu-adjust.png", {"mode": "adjust", "adjust": "face", "offset": (12, 6), "box": (25, 52, 252, 122), "step_px": 5})):
     shown = dict(menu, **extra)
     shown["tab_scroll"] = T.TAB_NAMES.index(shown["tab"]) if shown["tab"] in T.TAB_NAMES else 0
