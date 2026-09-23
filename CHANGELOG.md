@@ -1,5 +1,21 @@
 # Changelog
 
+## 2.17.0
+
+**Nodes: nicknames, last-seen, and a team handshake total.** A paired node's own reported name is often just
+"pwnagotchi" -- the web editor's Nodes tab now has a **Rename** button per paired row so you can give it a local
+nickname, shown everywhere from then on (touch menu included). An offline node now says how long ago it was last
+seen instead of just "offline". The summary line adds up the combined handshake total from every node currently
+online, so a glance says how much ground the group has covered together.
+
+**The web editor's Radar and Cracking tabs now refresh themselves.** While either tab is open it quietly re-checks
+every few seconds on its own -- a new handshake or a network coming into range shows up without a manual tab
+round-trip. True server push (a WebSocket/SSE feed) was considered and deliberately not built: pwnagotchi's own web
+server runs single-threaded, so a held-open stream would freeze every other request -- loading a theme, saving
+settings -- for as long as anyone had it open. Short polling gets the same practical result without that risk. Nodes
+is deliberately left out of this: its "add by address" field can hold text you are still typing, and a periodic
+refresh would wipe it out from under you.
+
 ## 2.16.2
 
 **The "skip a paired node's networks" switch moved into the Nodes tab.** It was tucked away in Settings, several

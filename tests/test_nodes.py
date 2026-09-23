@@ -120,6 +120,24 @@ srv_b.server_close()
 ok("unpairing removes it and is saved", tm.unpair_node("02:00:00:00:00:01") is True and "02:00:00:00:00:01" not in T._load_nodes())
 ok("unpairing something not paired is a clean no-op", tm.unpair_node("02:00:00:00:00:01") is False)
 
+# ---------------------------------------------------------------- nicknames: a local-only display name
+ok("renaming an unpaired mac is a clean no-op", tm.rename_node("02:00:00:00:00:99", "nope") is False)
+ok("renaming a paired node works", tm.rename_node("02:00:00:00:00:02", "  the good one  ") is True)
+paired, _ = tm.node_rows()
+ok("...and node_rows shows the (trimmed) nickname instead of the real name",
+   next(p for p in paired if p["mac"] == "02:00:00:00:00:02")["name"] == "the good one")
+ok("...saved to disk too", T._load_nodes()["02:00:00:00:00:02"]["nickname"] == "the good one")
+ok("clearing the nickname (blank) falls back to the node's own reported name",
+   tm.rename_node("02:00:00:00:00:02", "   ") is True
+   and next(p for p in tm.node_rows()[0] if p["mac"] == "02:00:00:00:00:02")["name"] == "node-b"
+   and "nickname" not in T._load_nodes()["02:00:00:00:00:02"])
+
+ok("_fmt_ago: just happened", T._fmt_ago(5) == "just now")
+ok("_fmt_ago: minutes", T._fmt_ago(125) == "2m ago")
+ok("_fmt_ago: hours", T._fmt_ago(3 * 3600 + 60) == "3h ago")
+ok("_fmt_ago: days", T._fmt_ago(2 * 86400 + 3600) == "2d ago")
+ok("_fmt_ago: never negative even if the clock is a little off", T._fmt_ago(-5) == "just now")
+
 srv_other.shutdown()
 srv_other.server_close()
 srv_nomac.shutdown()
@@ -216,6 +234,22 @@ tm4._view._agent = None
 tm4._sync_node_whitelist()
 ok("no live agent yet is also a clean no-op, not a crash", True)
 
+# ---------------------------------------------------------------- the summary line: an at-a-glance team total
+tm4._nodes_paired["02:00:00:00:00:0c"]["handshakes"] = 5
+menu4 = {}
+tm4._sync_nodes_menu(menu4)
+ok("the summary counts the online team's handshakes", "5 team shake" in menu4["nodes_info"]["__summary__"]["text"],
+   menu4["nodes_info"]["__summary__"]["text"])
+tm4._nodes_paired["02:00:00:00:00:0c"]["online"] = False
+tm4._sync_nodes_menu(menu4)
+ok("...but not an offline node's -- it is not actually helping right now", "0 team shake" in menu4["nodes_info"]["__summary__"]["text"],
+   menu4["nodes_info"]["__summary__"]["text"])
+tm4._nodes_paired["02:00:00:00:00:0c"]["online"] = True
+tm4.unpair_node("02:00:00:00:00:0c")
+tm4._sync_nodes_menu(menu4)
+ok("nothing paired at all: no team-shake mention, just the plain counts", "team shake" not in menu4["nodes_info"]["__summary__"]["text"],
+   menu4["nodes_info"]["__summary__"]["text"])
+
 # ---------------------------------------------------------------- the touch menu
 sandbox()
 tm3, ui3, els3 = new_manager()
@@ -278,4 +312,19 @@ ok("the other tabs stay reachable", tm3._menu["tab"] == "themes")
 T.scan_for_nodes = real_scan
 srv_c.shutdown()
 srv_c.server_close()
+
+# ---------------------------------------------------------------- tapping an offline paired row mentions how long ago
+sandbox()
+tm5, ui5, els5 = new_manager()
+tm5._settings = T.clean_settings({})
+tm5._display_cfg = T.clean_display({})
+tm5._nodes_paired = {"02:00:00:00:00:0d": {"mac": "02:00:00:00:00:0d", "name": "away-team", "handshakes": 3, "ip": None,
+                                            "online": False, "last_seen": time.time() - 130}}
+finger5 = Panel(tm5)
+finger5.calibrate()
+tm5.open_menu("list", "nodes")
+row_hit = finger5.hit("noderow", "p:02:00:00:00:00:0d")
+finger5.tap_rect(row_hit)
+ok("tapping an offline row mentions how long ago it was last seen", tm5._toast and "offline (2m ago)" in tm5._toast[0], tm5._toast)
+
 finish()

@@ -100,7 +100,7 @@ menu.update(radar=radar_rows, t=3.0)
 # plus a wardrive trip in progress right under the summary (made-up stats, never a real track)
 wardrive_stats = {"active": True, "distance_m": 2350, "duration_s": 1830, "aps_seen": 14, "handshakes": 3}
 nodes_info = {
-    "__summary__": {"kind": "summary", "text": "2 paired (1 online) · 1 found"},
+    "__summary__": {"kind": "summary", "text": "2 paired (1 online) · 1 found · 14 team shakes"},
     "__wardrive__": dict(wardrive_stats, kind="wardrive"),
     "__skipnet__": {"kind": "skipnet", "on": True},
     "p:02:00:00:00:00:11": {"kind": "paired", "mac": "02:00:00:00:00:11", "name": "zero-w-north", "ip": "192.0.2.10:8080", "handshakes": 14, "online": True},

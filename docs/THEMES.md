@@ -329,7 +329,9 @@ sqlite database and potfile the `wpa-sec` plugin already keeps. The web editor h
 Cracking tab, plus a **Map** tab: an OpenStreetMap view (loaded only when you open the tab) pinning every handshake
 that has a saved location, with a plain list and per-row "open on OpenStreetMap" links if the map itself cannot load.
 This does not replace `webgpsmap` (which maps every access point it sees); it only ties a location to your own
-captures. `theme_manager.py cracking` prints the summary as JSON, `cracking list` prints every row.
+captures. `theme_manager.py cracking` prints the summary as JSON, `cracking list` prints every row. While the
+Cracking tab is open in the web editor it also quietly re-checks every few seconds on its own, so a handshake landing
+or finishing an upload shows up without switching away and back.
 
 **Radar** is a sonar-style display of nearby networks: a rotating sweep line with a fading trail, and a blip for each
 network bettercap currently sees. Distance from the centre reflects signal strength (closer = stronger); each device
@@ -337,7 +339,9 @@ gets a bearing derived from its MAC address, since there is no real direction da
 between scans instead of jumping around. Tap a blip for its name, encryption, client count, signal and whether you
 already have a handshake for it (shown dimmed and ranked lower; this now also includes a paired node's captures, see
 below). Like the Cracking tab, this is purely a display: it never changes what pwnagotchi decides to attack. The web
-editor's Radar tab shows the same sweep, redrawn live.
+editor's Radar tab shows the same sweep, redrawn live, and -- like Cracking -- keeps re-checking on its own every few
+seconds while the tab stays open, rather than only refreshing on a tab switch. (Nodes deliberately does not: its
+"add by address" field can hold text you are still typing, and a periodic refresh would wipe it out from under you.)
 
 **Nodes** finds other units running the small `node_pwn.py` companion plugin (install it with `Node_PWN.sh`, the
 same way as this plugin's own `install.sh`), so a group of units end up covering more distinct ground instead of
@@ -359,10 +363,18 @@ every unit attacking the same network. Three ways to find one, in the order this
 Tap a found node to pair with it, tap a paired one for its address (or signal, for a mesh find) and handshake
 count, tap it again within a few seconds to unpair. A paired node is remembered by its MAC address (so a new
 DHCP-assigned IP, or simply drifting in and out of mesh range, never loses the pairing) and, if it goes offline, is
-shown as offline rather than dropped or left showing stale numbers. Pairing is purely local to this unit; a node
-itself never initiates anything and never talks to any other node on its own -- it only ever answers. The one thing
-pairing actually changes: a network a paired, *online* node has already captured now also shows as covered on your
-own Radar.
+shown as offline rather than dropped or left showing stale numbers -- with how long ago it was last seen, from the
+touch menu's tap-for-details message or right on the row in the web editor. Pairing is purely local to this unit; a
+node itself never initiates anything and never talks to any other node on its own -- it only ever answers. The one
+thing pairing actually changes: a network a paired, *online* node has already captured now also shows as covered on
+your own Radar.
+
+If a node's own name is not descriptive (every fresh pwnagotchi install answers to "pwnagotchi" until renamed), the
+web editor's Nodes tab has a **Rename** button on each paired row: give it a local nickname and that is what shows
+up everywhere from then on, on both the touch menu and the web editor. The nickname lives only in this unit's own
+`nodes.json` -- it is never sent to the node itself, and clearing it (leave the field blank) falls back to the
+node's own reported name. The summary line also now adds up the *online* team's combined handshake total, so a
+quick glance says how much ground the group has covered together, not just this one unit.
 
 Going out with a paired node also gets its own **Wardrive** row, right at the top of this same tab: a start/stop trip
 log, tap it to toggle `START` / `STOP`. While a trip is active it shows distance travelled, duration, unique networks

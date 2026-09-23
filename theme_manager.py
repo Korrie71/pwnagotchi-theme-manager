@@ -805,6 +805,20 @@ def _fmt_dur_s(s):
     return " ".join(parts)
 
 
+def _fmt_ago(seconds):
+    """How long ago, for a node that has gone offline -- coarse on purpose, this is context, not a stopwatch."""
+    seconds = max(0, int(seconds))
+    if seconds < 60:
+        return "just now"
+    minutes = seconds // 60
+    if minutes < 60:
+        return "%dm ago" % minutes
+    hours = minutes // 60
+    if hours < 24:
+        return "%dh ago" % hours
+    return "%dd ago" % (hours // 24)
+
+
 def _load_wardrive():
     try:
         with open(WARDRIVE_FILE) as fp:
@@ -2894,7 +2908,7 @@ def _pwa_icon(size, theme):
 
 class ThemeManager(plugins.Plugin):
     __author__ = "theme_manager contributors"
-    __version__ = "2.16.2"
+    __version__ = "2.17.0"
     __license__ = "GPL3"
     __description__ = "Theme engine for the 3.5 inch display: colors, effects, animations, custom text, web GUI."
 
@@ -3369,7 +3383,11 @@ class ThemeManager(plugins.Plugin):
         menu["wardrive"] = w
         paired, found = self.node_rows()
         online = sum(1 for p in paired if p.get("online", True))
-        info = {"__summary__": {"kind": "summary", "text": "%d paired (%d online) · %d found" % (len(paired), online, len(found))},
+        team_shakes = sum(p.get("handshakes", 0) for p in paired if p.get("online", True))
+        summary = "%d paired (%d online) · %d found" % (len(paired), online, len(found))
+        if paired:
+            summary += " · %d team shake%s" % (team_shakes, "" if team_shakes == 1 else "s")
+        info = {"__summary__": {"kind": "summary", "text": summary},
                 "__wardrive__": dict(w, kind="wardrive"),
                 "__skipnet__": {"kind": "skipnet", "on": self._settings["node_skip_captured"]}}
         order = ["__summary__", "__wardrive__", "__skipnet__"]
@@ -3750,6 +3768,22 @@ class ThemeManager(plugins.Plugin):
             self._sync_node_whitelist()
         return existed
 
+    def rename_node(self, mac, nickname):
+        """A local nickname for a paired node -- never sent to the node itself, purely so a screen full of units
+        all still called 'pwnagotchi' can be told apart. An empty nickname clears it, falling back to the node's
+        own reported name."""
+        nickname = (nickname or "").strip()[:40]
+        with self._nodes_lock:
+            if mac not in self._nodes_paired:
+                return False
+            if nickname:
+                self._nodes_paired[mac]["nickname"] = nickname
+            else:
+                self._nodes_paired[mac].pop("nickname", None)
+            paired = dict(self._nodes_paired)
+        _save_nodes(paired)
+        return True
+
     def refresh_paired_nodes(self):
         """Re-check every paired node, updating stats or marking it offline. A mesh-paired node is re-checked
         against the current mesh peers (it is "online" exactly when still in radio range); an IP-paired one is
@@ -3777,7 +3811,8 @@ class ThemeManager(plugins.Plugin):
         with whoever is on the mesh right now, live -- no scan needed to see a mesh peer, it is either currently in
         range or it is not."""
         with self._nodes_lock:
-            paired = [dict(info, mac=mac) for mac, info in self._nodes_paired.items()]
+            paired = [dict(info, mac=mac, name=(info.get("nickname") or info.get("name") or "?"))
+                      for mac, info in self._nodes_paired.items()]
             scanned = list(self._nodes_found)
         by_mac = {n["mac"]: n for n in scanned}
         by_mac.update({n["mac"]: n for n in _mesh_peers()})   # freshest wins where both see the same unit
@@ -4115,9 +4150,11 @@ class ThemeManager(plugins.Plugin):
                         else:
                             menu["confirm"] = (("nodeunpair", info["mac"]), now + CONFIRM_S)
                             where = info["ip"] or ("mesh, %d dBm" % info["rssi"] if info.get("rssi") is not None else "mesh")
+                            online = info.get("online", True)
+                            last_seen = info.get("last_seen")
+                            status = "online" if online else "offline (%s)" % _fmt_ago(time.time() - last_seen if last_seen else 0)
                             msg = "%s: %s, %d handshake%s, %s -- tap again to unpair" % (
-                                info["name"], where, info["handshakes"], "" if info["handshakes"] == 1 else "s",
-                                "online" if info.get("online", True) else "offline")
+                                info["name"], where, info["handshakes"], "" if info["handshakes"] == 1 else "s", status)
                             self.toast(msg, seconds=4, now=now)
                         self._refresh_now()
                     return
@@ -4914,6 +4951,10 @@ class ThemeManager(plugins.Plugin):
                     ok_ = self.unpair_node(str(data.get("mac", "")))
                     paired, found = self.node_rows()
                     return jsonify({"ok": ok_, "paired": paired, "found": found})
+                if path == "api/nodes/rename":
+                    ok_ = self.rename_node(str(data.get("mac", "")), str(data.get("nickname", "")))
+                    paired, found = self.node_rows()
+                    return jsonify({"ok": ok_, "paired": paired, "found": found})
                 if path == "api/wardrive/start":
                     self.start_wardrive()
                     return jsonify(dict(self.wardrive_status(), ok=True))
@@ -5062,7 +5103,16 @@ const ANIM=['pulse','rainbow','glitch','rain','stars','noise'];
 const MOODS=['look_r','sleep','awake','bored','intense','cool','happy','grateful','excited','motivated','demotivated','smart','lonely','sad','angry','friend','broken','debug','upload','handshake'];
 const HOLDERS=['{name}','{time}','{date}','{cpu}','{temp}','{mem}','{uptime}','{ip}','{mode}','{gps}','{lat}','{lon}','{sats}','{handshakes}','{cracked}','{session}','{power}','{battery}'];
 const TABS=['Colors','Effects','Text','Elements','Moods','Faces','JSON','Layout','Awards','Cracking','Radar','Map','Nodes','Settings'];
-let S={active:'',themes:{}},sel='',cur={},info={elements:[],entities:[],packs:{}},tab='Colors',mood='sad',pvMood=null,busy=false,dirty=false,pvErr=false,timer=null;
+let S={active:'',themes:{}},sel='',cur={},info={elements:[],entities:[],packs:{}},tab='Colors',mood='sad',pvMood=null,busy=false,dirty=false,pvErr=false,timer=null,liveTimer=null;
+// Tabs that change on their own (a network appearing, a handshake landing) get polled every few seconds while
+// open, so they stay current without a manual tab round-trip. Server push (SSE/WebSocket) is not safe here --
+// pwnagotchi's own web server runs single-threaded (app.run() with no threaded=True), so a held-open stream
+// would freeze every other request -- loading a theme, saving settings -- for as long as anyone had it open.
+// Nodes is deliberately left out: its "add by address" field holds text the user is mid-typing, and a periodic
+// full re-render would wipe it out from under them.
+const LIVE_LOADERS={Radar:loadRadar,Cracking:loadCracking};
+function liveRefresh(n){clearInterval(liveTimer);if(!LIVE_LOADERS[n])return;
+ liveTimer=setInterval(async()=>{if(tab!==n||busy)return;await LIVE_LOADERS[n]();if(tab===n)panel()},4000)}
 const say=t=>$('msg').textContent=t||'';
 /* After the plugin restarts (or the browser loses its session) the page's token is stale: fetch a fresh one and retry once. */
 async function newToken(){try{const h=await(await fetch(location.pathname,{cache:'no-store'})).text();const m=h.match(/name="csrf_token" content="([^"]+)"/);if(m){CSRF=m[1];return true}}catch(e){}return false}
@@ -5377,6 +5427,8 @@ function panelWardriveSection(p){const w=wardrive;
 let nodes={paired:[],found:[]},nodesScanning=false;
 async function loadNodes(){try{nodes=await(await fetch(base+'/api/nodes')).json()}catch(e){}}
 const nodeWhere=n=>n.ip?n.ip:('mesh'+(n.rssi!=null?', '+n.rssi+' dBm':''));
+const fmtAgo=s=>{s=Math.max(0,Math.round(s));if(s<60)return'just now';const m=Math.floor(s/60);if(m<60)return m+'m ago';
+ const h=Math.floor(m/60);if(h<24)return h+'h ago';return Math.floor(h/24)+'d ago'};
 function panelNodes(){const p=E('div');
  panelWardriveSection(p);
  p.append(E('h2',{},'Nodes'));
@@ -5397,10 +5449,17 @@ function panelNodes(){const p=E('div');
   finally{addBtn.textContent='Add';addBtn.disabled=false;panel()}}},'Add');
  p.append(E('div',{class:'row',style:'margin-bottom:10px'},hostIn,addBtn));
  if(!nodes.paired.length&&!nodes.found.length){p.append(E('p',{style:'color:var(--dim);margin-top:10px'},'No nodes yet: none in mesh range, and nothing found on this network. Bring one closer, scan, or add one by address above.'));return p}
+ if(nodes.paired.length){const online=nodes.paired.filter(n=>n.online).length,
+  shakes=nodes.paired.filter(n=>n.online).reduce((a,n)=>a+n.handshakes,0);
+  p.append(E('p',{style:'color:var(--dim);margin:4px 0 10px'},
+   nodes.paired.length+' paired ('+online+' online) · '+nodes.found.length+' found · '+shakes+' team handshake'+(shakes===1?'':'s')))}
  for(const n of nodes.paired){
+  const offline=n.online?'':'  (offline, last seen '+fmtAgo(Date.now()/1000-(n.last_seen||0))+')';
   p.append(E('div',{class:'erow'+(n.online?' set':''),style:n.online?'':'opacity:.55'},
    E('span',{class:'ename',style:'width:170px'},(n.online?'● ':'○ ')+n.name),
-   E('span',{class:'inh',style:'flex:1'},nodeWhere(n)+'  ·  '+n.handshakes+' handshake'+(n.handshakes===1?'':'s')+(n.online?'':'  (offline)')),
+   E('span',{class:'inh',style:'flex:1'},nodeWhere(n)+'  ·  '+n.handshakes+' handshake'+(n.handshakes===1?'':'s')+offline),
+   E('button',{onclick:async()=>{const nickname=prompt('Nickname for this node (blank clears it):',n.nickname||'');if(nickname===null)return;
+    const r=await(await post('nodes/rename',{mac:n.mac,nickname})).json();nodes={paired:r.paired,found:r.found};panel()}},'Rename'),
    E('button',{onclick:async()=>{const r=await(await post('nodes/unpair',{mac:n.mac})).json();nodes={paired:r.paired,found:r.found};panel()}},'Unpair')))}
  for(const n of nodes.found){
   p.append(E('div',{class:'erow set'},
@@ -5435,7 +5494,7 @@ function panelSettings(){const p=E('div'),s=cfg.settings,d=cfg.display;
  return p}
 const PANELS={Colors:panelColors,Effects:panelEffects,Text:panelText,Elements:panelElements,Moods:panelMoods,Faces:panelFaces,JSON:panelJson,Layout:panelLayout,Awards:panelAwards,Cracking:panelCracking,Radar:panelRadar,Map:panelMap,Nodes:panelNodes,Settings:panelSettings};
 function panel(){const p=$('panel');p.innerHTML='';p.append(PANELS[tab]());
- const t=$('tabs');t.innerHTML='';for(const n of TABS)t.append(E('button',{class:n===tab?'on':'',onclick:async()=>{tab=n;pickKey=null;$('pick').innerHTML='';$('pick').className='';pvMood=n==='Moods'?mood:null;if(n==='Elements'||n==='Moods'){try{info.entities=await(await fetch(base+'/api/entities')).json()}catch(e){}}if(n==='Layout')await loadLayout();if(n==='Awards')await loadAwards();if(n==='Cracking')await loadCracking();if(n==='Radar')await loadRadar();if(n==='Map')await loadLocations();if(n==='Nodes'){await loadNodes();await loadWardrive();await loadSettings()}if(n==='Settings')await loadSettings();panel();overlay();schedule()}},n))}
+ const t=$('tabs');t.innerHTML='';for(const n of TABS)t.append(E('button',{class:n===tab?'on':'',onclick:async()=>{tab=n;pickKey=null;$('pick').innerHTML='';$('pick').className='';pvMood=n==='Moods'?mood:null;if(n==='Elements'||n==='Moods'){try{info.entities=await(await fetch(base+'/api/entities')).json()}catch(e){}}if(n==='Layout')await loadLayout();if(n==='Awards')await loadAwards();if(n==='Cracking')await loadCracking();if(n==='Radar')await loadRadar();if(n==='Map')await loadLocations();if(n==='Nodes'){await loadNodes();await loadWardrive();await loadSettings()}if(n==='Settings')await loadSettings();liveRefresh(n);panel();overlay();schedule()}},n))}
 
 /* ---- drag text lines on the preview ---- */
 const est=t=>(t||'').replace(/\{time\}/g,'00:00:00').replace(/\{date\}/g,'0000-00-00').replace(/\{\w+\}/g,'0000').length;
