@@ -273,6 +273,22 @@ with sync_playwright() as p:
     page.wait_for_timeout(200)
     check("the Nodes tab loads with no browser error (nothing found yet)", page.locator("p:has-text('No nodes yet')").count() == 1)
 
+    skip_box = page.locator("label.ck:has-text('skip networks a paired node already has') input")
+    check("the skip-captured-networks setting lives right here in Nodes, off by default", skip_box.is_checked() is False)
+    sent_skip = {}
+
+    def skip_route(route):
+        body = json.loads(route.request.post_data)
+        sent_skip.update(body.get("settings", {}))
+        route.fulfill(body=json.dumps({"ok": True, "settings": body.get("settings", {}), "display": {"dim": 1, "night": None, "idle": None}}),
+                       content_type="application/json")
+
+    page.route("**/api/settings", skip_route)
+    skip_box.check()
+    page.wait_for_timeout(150)
+    check("checking it saves node_skip_captured", sent_skip.get("node_skip_captured") is True)
+    page.unroute("**/api/settings")
+
     mesh_node = {"node": "node_pwn", "mac": "02:00:00:00:00:0b", "name": "zz-e2e-mesh", "ip": None,
                  "handshakes": 6, "bssids": ["aabbccddeeff"], "via": "mesh", "rssi": -58}
     page.route("**/api/nodes", lambda r: r.fulfill(body=json.dumps({"paired": [], "found": [mesh_node]}), content_type="application/json"))

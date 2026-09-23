@@ -2508,9 +2508,9 @@ def draw_menu(img, menu, theme):
         d.text((240, 178), "(Settings in the web editor, or settings.json)", font=_font(12), fill=_mixc(fg, bg, 0.4), anchor="mm")
     if tab == "layout" and not menu["layout"]:
         d.text((240, 150), "Nothing on the screen yet", font=_font(16, True), fill=fg, anchor="mm")
-    if tab == "nodes" and len(menu.get("nodes", [])) <= 2:
-        d.text((240, 194), "No nodes yet", font=_font(16, True), fill=fg, anchor="mm")
-        d.text((240, 222), "Install node_pwn on another unit, then tap scan", font=_font(12), fill=_mixc(fg, bg, 0.4), anchor="mm")
+    if tab == "nodes" and len(menu.get("nodes", [])) <= 3:
+        d.text((240, 198), "No nodes yet", font=_font(16, True), fill=fg, anchor="mm")
+        d.text((240, 226), "Install node_pwn on another unit, then tap scan", font=_font(12), fill=_mixc(fg, bg, 0.4), anchor="mm")
     if tab == "system":
         for i, text in enumerate(menu.get("lines", ())):
             d.text((32, 46 + i * 24), text, font=_font(16), fill=fg)
@@ -2614,6 +2614,13 @@ def draw_menu(img, menu, theme):
                 d.rounded_rectangle((px0, y0 + 7, px1, y1 - 7), 10, fill=acc if active else panel, outline=acc, width=2)
                 d.text(((px0 + px1) // 2, cy), "STOP" if active else "START", font=_font(13, True),
                        fill=bg if active else fg, anchor="mm")
+            elif info["kind"] == "skipnet":
+                on, cy = info.get("on", False), (y0 + y1) // 2
+                d.rectangle(rect, fill=line, outline=acc if on else line, width=2)
+                d.text((x0 + 12, cy), "skip a paired node's networks", font=_font(14, on), fill=fg, anchor="lm")
+                px0, px1 = x1 - 66, x1 - 10
+                d.rounded_rectangle((px0, y0 + 7, px1, y1 - 7), 10, fill=acc if on else panel, outline=acc, width=2)
+                d.text(((px0 + px1) // 2, cy), "ON" if on else "OFF", font=_font(13, True), fill=bg if on else fg, anchor="mm")
             else:
                 paired, online = info["kind"] == "paired", info.get("online", True)
                 dim = paired and not online
@@ -2887,7 +2894,7 @@ def _pwa_icon(size, theme):
 
 class ThemeManager(plugins.Plugin):
     __author__ = "theme_manager contributors"
-    __version__ = "2.16.1"
+    __version__ = "2.16.2"
     __license__ = "GPL3"
     __description__ = "Theme engine for the 3.5 inch display: colors, effects, animations, custom text, web GUI."
 
@@ -3363,8 +3370,9 @@ class ThemeManager(plugins.Plugin):
         paired, found = self.node_rows()
         online = sum(1 for p in paired if p.get("online", True))
         info = {"__summary__": {"kind": "summary", "text": "%d paired (%d online) · %d found" % (len(paired), online, len(found))},
-                "__wardrive__": dict(w, kind="wardrive")}
-        order = ["__summary__", "__wardrive__"]
+                "__wardrive__": dict(w, kind="wardrive"),
+                "__skipnet__": {"kind": "skipnet", "on": self._settings["node_skip_captured"]}}
+        order = ["__summary__", "__wardrive__", "__skipnet__"]
         for p in paired:
             info["p:" + p["mac"]] = dict(p, kind="paired")
             order.append("p:" + p["mac"])
@@ -3827,6 +3835,12 @@ class ThemeManager(plugins.Plugin):
         self._set_warning(time.time())
         self._refresh_now()
 
+    def _toggle_node_skip(self):
+        on = not self._settings["node_skip_captured"]
+        self.save_settings(dict(self._settings, node_skip_captured=on))
+        self.toast("skip a paired node's networks: %s" % ("ON" if on else "OFF"))
+        self._refresh_now()
+
     def _check_overheat(self, temp, now):
         """With the option on: if the CPU stays at or above the limit long enough, count down 30 s on screen and turn the
         Pi off (a touch cancels and snoozes it). Cooling down cancels it too."""
@@ -4080,6 +4094,9 @@ class ThemeManager(plugins.Plugin):
                             self.toast("wardrive started", seconds=3, now=now)
                         self._sync_nodes_menu(menu)
                         self._refresh_now()
+                    elif info["kind"] == "skipnet":
+                        self._toggle_node_skip()
+                        self._sync_nodes_menu(menu)
                     elif info["kind"] == "found":
                         menu["confirm"] = None
                         if self.pair_node(info["mac"]):
@@ -5364,6 +5381,9 @@ function panelNodes(){const p=E('div');
  panelWardriveSection(p);
  p.append(E('h2',{},'Nodes'));
  p.append(E('p',{style:'color:var(--dim);margin:0 0 10px'},'Other units running node_pwn (install it with Node_PWN.sh). Nodes in WiFi range show up here on their own, over pwnagotchi’s own mesh -- no shared network needed. Pair one to see its capture stats here; a paired node’s handshakes count as already covered on the Radar tab, so a group of units end up covering more ground instead of attacking the same network twice.'));
+ p.append(E('div',{class:'row'},check('skip networks a paired node already has',cfg.settings.node_skip_captured,async on=>{
+  cfg.settings.node_skip_captured=on;await saveSettings()})),
+  E('p',{style:'color:var(--dim);margin:6px 0 14px'},'Off by default. On, a network a paired, online node already captured is added to pwnagotchi’s own whitelist for as long as that stays true, so this unit genuinely skips it instead of just showing it covered on the Radar — the same live, no-restart-needed mechanism as the attack mode (Settings tab) uses. It never touches whitelist entries you added yourself, and cleans up the moment a node is unpaired, goes offline, or this is switched off again.'));
  const btn=E('button',{onclick:async()=>{if(nodesScanning)return;nodesScanning=true;btn.textContent='scanning…';btn.disabled=true;
   try{const r=await(await post('nodes/scan',{})).json();nodes={paired:r.paired,found:r.found}}catch(e){}
   finally{nodesScanning=false;panel()}}},'Scan for nodes on this network');
@@ -5397,8 +5417,6 @@ function panelSettings(){const p=E('div'),s=cfg.settings,d=cfg.display;
  p.append(E('h2',{},'Attack mode'),E('div',{class:'row'},
   select([['aggressive','Aggressive (normal)'],['passive','Passive recon'],['home','Home defense']],s.mode||'aggressive',v=>{s.mode=v})),
   E('p',{style:'color:var(--dim);margin:6px 0 14px'},'Aggressive is normal pwnagotchi behavior. Passive turns deauth and association off right away, no restart needed; Aggressive puts them back. Home defense does the same as Passive, and also watches for a new device broadcasting one of the network names in your whitelist, a common sign of a rogue access point.'));
- p.append(E('div',{class:'row'},check('skip networks a paired node already has',s.node_skip_captured,on=>{s.node_skip_captured=on})),
-  E('p',{style:'color:var(--dim);margin:6px 0 14px'},'Off by default. On, a network a paired, online node (Nodes tab) already captured is added to pwnagotchi’s own whitelist for as long as that stays true, so this unit genuinely skips it instead of just showing it covered on the Radar — the same live, no-restart-needed mechanism as the attack mode above. It never touches whitelist entries you added yourself, and cleans up the moment a node is unpaired, goes offline, or this is switched off again.'));
  p.append(E('h2',{},'Overheating'),E('div',{class:'row'},
   check('switch the Pi off when it stays too hot',s.overheat_off,on=>{s.overheat_off=on;panel()}),
   field('above (°C)',num(s.overheat_temp,v=>s.overheat_temp=v,70,95)),
@@ -5417,7 +5435,7 @@ function panelSettings(){const p=E('div'),s=cfg.settings,d=cfg.display;
  return p}
 const PANELS={Colors:panelColors,Effects:panelEffects,Text:panelText,Elements:panelElements,Moods:panelMoods,Faces:panelFaces,JSON:panelJson,Layout:panelLayout,Awards:panelAwards,Cracking:panelCracking,Radar:panelRadar,Map:panelMap,Nodes:panelNodes,Settings:panelSettings};
 function panel(){const p=$('panel');p.innerHTML='';p.append(PANELS[tab]());
- const t=$('tabs');t.innerHTML='';for(const n of TABS)t.append(E('button',{class:n===tab?'on':'',onclick:async()=>{tab=n;pickKey=null;$('pick').innerHTML='';$('pick').className='';pvMood=n==='Moods'?mood:null;if(n==='Elements'||n==='Moods'){try{info.entities=await(await fetch(base+'/api/entities')).json()}catch(e){}}if(n==='Layout')await loadLayout();if(n==='Awards')await loadAwards();if(n==='Cracking')await loadCracking();if(n==='Radar')await loadRadar();if(n==='Map')await loadLocations();if(n==='Nodes'){await loadNodes();await loadWardrive()}if(n==='Settings')await loadSettings();panel();overlay();schedule()}},n))}
+ const t=$('tabs');t.innerHTML='';for(const n of TABS)t.append(E('button',{class:n===tab?'on':'',onclick:async()=>{tab=n;pickKey=null;$('pick').innerHTML='';$('pick').className='';pvMood=n==='Moods'?mood:null;if(n==='Elements'||n==='Moods'){try{info.entities=await(await fetch(base+'/api/entities')).json()}catch(e){}}if(n==='Layout')await loadLayout();if(n==='Awards')await loadAwards();if(n==='Cracking')await loadCracking();if(n==='Radar')await loadRadar();if(n==='Map')await loadLocations();if(n==='Nodes'){await loadNodes();await loadWardrive();await loadSettings()}if(n==='Settings')await loadSettings();panel();overlay();schedule()}},n))}
 
 /* ---- drag text lines on the preview ---- */
 const est=t=>(t||'').replace(/\{time\}/g,'00:00:00').replace(/\{date\}/g,'0000-00-00').replace(/\{\w+\}/g,'0000').length;

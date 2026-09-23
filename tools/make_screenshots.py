@@ -102,6 +102,7 @@ wardrive_stats = {"active": True, "distance_m": 2350, "duration_s": 1830, "aps_s
 nodes_info = {
     "__summary__": {"kind": "summary", "text": "2 paired (1 online) · 1 found"},
     "__wardrive__": dict(wardrive_stats, kind="wardrive"),
+    "__skipnet__": {"kind": "skipnet", "on": True},
     "p:02:00:00:00:00:11": {"kind": "paired", "mac": "02:00:00:00:00:11", "name": "zero-w-north", "ip": "192.0.2.10:8080", "handshakes": 14, "online": True},
     "p:02:00:00:00:00:12": {"kind": "paired", "mac": "02:00:00:00:00:12", "name": "zero-w-south", "ip": "192.0.2.11:8080", "handshakes": 3, "online": False},
     "f:02:00:00:00:00:13": {"kind": "found", "mac": "02:00:00:00:00:13", "name": "zero-w-new", "ip": "192.0.2.12:8080", "handshakes": 7},

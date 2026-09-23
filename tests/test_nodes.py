@@ -232,9 +232,17 @@ def wait_scan(tm, seconds=3):
 
 
 tm3.open_menu("list", "nodes")
-ok("the nodes tab opens with nothing yet", tm3._menu["tab"] == "nodes" and len(tm3._menu["nodes"]) == 2)
+ok("the nodes tab opens with nothing yet", tm3._menu["tab"] == "nodes" and len(tm3._menu["nodes"]) == 3)
 T.draw_menu(__import__("PIL.Image", fromlist=["Image"]).new("RGB", (480, 320)), tm3._menu, tm3._theme)
 ok("...and draws the empty-state hint without crashing", True)
+
+ok("the skip-captured-networks row starts off", not tm3._settings["node_skip_captured"])
+skip_hit = finger.hit("noderow", "__skipnet__")
+finger.tap_rect(skip_hit)
+ok("tapping it turns the setting on", tm3._settings["node_skip_captured"] is True)
+ok("...and the row reflects that right away", tm3._menu["nodes_info"]["__skipnet__"]["on"] is True)
+finger.tap_rect(skip_hit)
+ok("tapping it again turns it back off", tm3._settings["node_skip_captured"] is False)
 
 srv_c, addr_c = fake_node({"node": "node_pwn", "version": "1.0.0", "name": "node-c", "mac": "02:00:00:00:00:03",
                             "handshakes": 5, "bssids": ["aabbccddeeff"], "uptime": 20})

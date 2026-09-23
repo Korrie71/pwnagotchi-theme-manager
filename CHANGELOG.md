@@ -1,5 +1,12 @@
 # Changelog
 
+## 2.16.2
+
+**The "skip a paired node's networks" switch moved into the Nodes tab.** It was tucked away in Settings, several
+taps from the feature it actually affects. Both the touch menu and the web editor now show it as a row right below
+Wardrive, at the top of Nodes -- same off-by-default switch, same live whitelist mechanism, just where you'd look
+for it. No settings or saved data changed.
+
 ## 2.16.1
 
 **Wardrive moved under the Nodes tab.** It shipped in 2.16.0 as its own standalone tab, but a trip log is really a

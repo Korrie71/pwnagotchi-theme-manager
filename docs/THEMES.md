@@ -364,13 +364,6 @@ itself never initiates anything and never talks to any other node on its own -- 
 pairing actually changes: a network a paired, *online* node has already captured now also shows as covered on your
 own Radar.
 
-The web editor's **Settings** tab has an optional, off-by-default switch: **"skip networks a paired node already
-has"**. Turned on, a network a paired, online node has already captured is added to pwnagotchi's own whitelist for as
-long as that stays true, so this unit genuinely stops attacking it instead of just showing it covered on the Radar --
-the same live, no-restart-needed in-memory mechanism the attack-mode setting already uses. It never touches a
-whitelist entry you added yourself in `config.toml`, and cleans up automatically the moment a node is unpaired, goes
-offline, or the switch is turned back off.
-
 Going out with a paired node also gets its own **Wardrive** row, right at the top of this same tab: a start/stop trip
 log, tap it to toggle `START` / `STOP`. While a trip is active it shows distance travelled, duration, unique networks
 seen and handshakes captured since it started, ticking live while the tab is open. It reuses pwnagotchi's own `gps`
@@ -380,6 +373,13 @@ saved to `/etc/pwnagotchi/themes/wardrive.json` and picked back up after a resta
 trip's summary even after it ends. Starting a new trip clears the previous one. The web editor's own Nodes tab shows
 the same status plus the full breadcrumb trail on an OpenStreetMap route (loaded only when you open the tab). Like
 Radar and Cracking, this is purely a log: it never changes what pwnagotchi attacks.
+
+Right below it is an optional, off-by-default row: **"skip a paired node's networks"** (touch menu) / **"skip
+networks a paired node already has"** (web editor). Turned on, a network a paired, online node has already captured
+is added to pwnagotchi's own whitelist for as long as that stays true, so this unit genuinely stops attacking it
+instead of just showing it covered on the Radar -- the same live, no-restart-needed in-memory mechanism the
+attack-mode setting already uses. It never touches a whitelist entry you added yourself in `config.toml`, and cleans
+up automatically the moment a node is unpaired, goes offline, or the switch is turned back off.
 
 Each handshake also gets a **quality** guess, worked out locally from the capture itself instead of waiting for
 wpa-sec: a full handshake, a PMKID (crackable without a client ever connecting), only a partial capture, or empty
