@@ -65,7 +65,9 @@ def node_bssids(handshake_dir=None):
     return out
 
 
-def _identity(mac_path="/sys/class/net/wlan0/address"):
+def _identity(mac_path=None):
+    # for testing: a real pwnagotchi never sets this, and always has a real wlan0
+    mac_path = mac_path or os.environ.get("NODE_PWN_MAC_FILE") or "/sys/class/net/wlan0/address"
     try:
         import pwnagotchi
         name = pwnagotchi.config["main"]["name"]
@@ -78,14 +80,14 @@ def _identity(mac_path="/sys/class/net/wlan0/address"):
     return name, mac
 
 
-def node_info(started, mac_path="/sys/class/net/wlan0/address"):
+def node_info(started, mac_path=None):
     name, mac = _identity(mac_path)
     bssids = node_bssids()
     return {"node": "node_pwn", "version": __version__, "name": name, "mac": mac,
             "handshakes": len(bssids), "bssids": bssids, "uptime": round(time.time() - started)}
 
 
-def mesh_payload(mac_path="/sys/class/net/wlan0/address"):
+def mesh_payload(mac_path=None):
     """The compact version of node_info() that actually fits in a mesh advertisement: capped BSSID list, no
     uptime/version noise the other unit does not need for this."""
     name, mac = _identity(mac_path)

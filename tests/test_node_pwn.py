@@ -69,6 +69,7 @@ ok("name and mac are in the compact payload too", payload["mac"] == "02:00:00:00
 os.environ["NODE_PWN_HANDSHAKES"] = d
 
 # ---------------------------------------------------------------- pushing to the mesh (over pwnagotchi's own grid)
+os.environ["NODE_PWN_MAC_FILE"] = fake_mac   # a CI runner has no real wlan0 to read a mac from
 pushed = []
 G.set_advertisement_data = lambda data: pushed.append(data)
 plugin2 = N.NodePwn()
@@ -91,4 +92,5 @@ plugin2.on_handshake(None, "x.pcapng", {}, {})
 ok("a mesh push failure (pwngrid not running, say) does not crash the plugin", True)
 
 del os.environ["NODE_PWN_HANDSHAKES"]
+del os.environ["NODE_PWN_MAC_FILE"]
 finish()
