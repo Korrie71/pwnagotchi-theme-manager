@@ -7,6 +7,7 @@ import sys
 from _util import T, draw_pass, finish, new_manager, ok, sandbox, scene
 
 sandbox()
+T._http_get = lambda url, timeout=6: None     # installing a theme that uses a face pack tries to download it: never for real here
 
 # ---------------------------------------------------------------- a fresh setup starts with nothing
 ok("nothing is installed on a fresh setup", T._load_installed() == set())
