@@ -371,6 +371,16 @@ the same live, no-restart-needed in-memory mechanism the attack-mode setting alr
 whitelist entry you added yourself in `config.toml`, and cleans up automatically the moment a node is unpaired, goes
 offline, or the switch is turned back off.
 
+Going out with a paired node also gets its own **Wardrive** tab, right next to Nodes: a start/stop trip log, one
+button, `START WARDRIVE` / `STOP`. While a trip is active it shows distance travelled, duration, unique networks seen
+and handshakes captured since it started, ticking live while the tab is open. It reuses pwnagotchi's own `gps` plugin
+(nothing new to configure) and logs a breadcrumb point every 20 seconds of movement of at least 15 metres -- not
+continuously, so a stationary unit doesn't fill the log with noise. Points, distance and the running counts are saved
+to `/etc/pwnagotchi/themes/wardrive.json` and picked back up after a restart, so the tab still shows the last trip's
+summary even after it ends. Starting a new trip clears the previous one. The web editor's own Wardrive tab shows the
+same status plus the full breadcrumb trail on an OpenStreetMap route (loaded only when you open the tab). Like Radar
+and Cracking, this is purely a log: it never changes what pwnagotchi attacks.
+
 Each handshake also gets a **quality** guess, worked out locally from the capture itself instead of waiting for
 wpa-sec: a full handshake, a PMKID (crackable without a client ever connecting), only a partial capture, or empty
 (likely junk, e.g. a deauth that never got a reply). It's a best-effort look at the raw bytes, not a full parser, so
@@ -382,16 +392,6 @@ had a fix. The dashboard reads that (nothing new to turn on): tap a located hand
 editor shows a **map** link straight to OpenStreetMap for it, and the summary counts how many are located. This
 project doesn't draw its own map (`webgpsmap` already does that well); it just ties a location to a specific
 capture's crack status.
-
-**Wardrive** is a start/stop trip log: one button, `START WARDRIVE` / `STOP`. While a trip is active it shows distance
-travelled, duration, unique networks seen and handshakes captured since it started, ticking live while the tab is
-open. It reuses pwnagotchi's own `gps` plugin (nothing new to configure) and logs a breadcrumb point every 20 seconds
-of movement of at least 15 metres -- not continuously, so a stationary unit doesn't fill the log with noise. Points,
-distance and the running counts are saved to `/etc/pwnagotchi/themes/wardrive.json` and picked back up after a
-restart, so the tab still shows the last trip's summary even after it ends. Starting a new trip clears the previous
-one. The web editor's own **Wardrive** tab shows the same status plus the full breadcrumb trail on an OpenStreetMap
-route (loaded only when you open the tab). Like Radar and Cracking, this is purely a log: it never changes what
-pwnagotchi attacks.
 
 **Swipe:** on the bare screen (no menu open), swipe sideways to change theme: left goes to the next theme, right to the
 previous one, and the new theme's name shows for a moment. It needs the calibration, and only clearly sideways swipes
