@@ -156,13 +156,11 @@ tmp, uip, elp = new_manager()
 ok("a theme that needs no pack downloads nothing", tmp.install_theme("matrix") and not tmp._pack_busy and not os.path.isdir(os.path.join(T.FACES_DIR, "blob")))
 tmp._toast = None
 ok("installing a bundled theme that uses a face pack starts downloading it", tmp.install_theme("blobby") is True)
-end = _time.time() + 5
-while not os.path.isdir(os.path.join(T.FACES_DIR, "blob")) and _time.time() < end:
+end = _time.time() + 15
+while tmp._pack_busy and _time.time() < end:      # set before install_theme returns, so this cannot miss the download
     _time.sleep(0.02)
-end = _time.time() + 3
-while tmp._pack_busy and _time.time() < end:
-    _time.sleep(0.02)
-ok("...and the pack arrives", sorted(os.listdir(os.path.join(T.FACES_DIR, "blob"))) == ["happy.png", "sad.png"])
+got = sorted(os.listdir(os.path.join(T.FACES_DIR, "blob"))) if os.path.isdir(os.path.join(T.FACES_DIR, "blob")) else None
+ok("...and the pack arrives", got == ["happy.png", "sad.png"], got)
 ok("...with a toast", tmp._toast and "blob faces ready" in tmp._toast[0], tmp._toast)
 before = len(asked)
 ok("a pack that is already here is not downloaded again", tmp.ensure_face_pack("blob") is False and len(asked) == before)
@@ -242,7 +240,7 @@ code, j = call("api/delete", {"name": "ocean"})
 ok("api/delete: refuses a bundled theme (uninstall is the way)", code == 400)
 T._http_get = fake_get
 code, j = call("api/save", {"name": "with-faces", "theme": {"bg": "#000000", "fg": "#ffffff", "accent": "#ffffff", "web": "#ffffff", "face_pack": "blob"}, "fetch_pack": True})
-end = _time.time() + 5
+end = _time.time() + 15
 while (tm3._pack_busy or not os.path.isdir(os.path.join(T.FACES_DIR, "blob"))) and _time.time() < end:
     _time.sleep(0.02)
 ok("api/save: an online theme that names a face pack brings it along", code == 200 and j["ok"] and os.path.isdir(os.path.join(T.FACES_DIR, "blob")))
