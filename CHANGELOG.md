@@ -1,5 +1,39 @@
 # Changelog
 
+## 3.0.0
+
+**Themes are installed before you can use them, and they change the whole layout, not just the colors.** This is a
+big change, so it is a new major version.
+
+*Install first.* A fresh setup now has **no themes**: the screen shows the plain pwnagotchi look until you choose one.
+The web editor has a new **Gallery** tab listing every bundled theme with a live preview (drawn with that theme's real
+layout) and an Install/Uninstall button, plus an **Online** list from the project's GitHub catalog (`catalog.json`)
+that your browser fetches and the plugin validates before saving. The touch menu's Themes tab lists what you have
+installed and has a **store** button: every bundled theme with an install/installed pill, tap to install or uninstall. From the command line: `library`, `install NAME`,
+`uninstall NAME`. **Updating never changes anyone's screen:** the first run after updating keeps whatever bundled theme
+you were using (your own saved themes were always yours), and everything else simply becomes available in the Gallery.
+
+*Structure.* A theme can now carry four new fields: `layout` (move elements), `sizes` (bigger or smaller text, by
+scaling the font so it stays sharp), `hide` (drop elements) and `panels` (boxes and lines drawn behind everything, in the
+theme's own palette so they follow its moods). The bundled themes do not use them (they keep pwnagotchi's own
+layout); the two example themes in `themes/` do. A new **Structure** tab in the web editor edits all of it (hide/show, size and move per
+element, add and remove boxes and lines) without writing JSON. Unknown element names are ignored, so a theme made on one
+setup still works on another.
+
+*The store, sharing and packs.* The touch store has a filter row (all / animated / scenery / dark / light / not
+installed) and an **on phone** button that shows a QR code for the web editor's Gallery (drawn by a small QR encoder
+built into the plugin, checked against a real decoder). The web Gallery gets a search box and the same filters. **Share**
+opens GitHub's new-file page with your theme filled in, and the Online list is now simply the project's `themes/`
+folder, so sharing is one file with no index to edit. A theme that uses a face pack (bundled or online) now downloads
+the pack when you install it, in the background, with the same checks as an upload.
+
+*The doctor.* A Doctor tab in the web editor and a `doc` button on the touch System tab report what looks wrong -- a crash
+loop, a stuck WiFi driver, pwngrid-peer or bt-tether failing, a plugin logging errors, a full disk -- with what to do
+about it, judged over the last hour from the log, the kernel messages, the service and the disk. Read-only.
+
+Also: the two example themes in `themes/` now show off structure, and previews everywhere now redraw the screen with the
+theme's layout rather than only recoloring what is on screen.
+
 ## 2.18.0
 
 **Wardrive route map on the touch screen.** Tap the Wardrive row (anywhere except the START/STOP pill, which still

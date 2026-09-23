@@ -5,9 +5,10 @@ effects, animations and your own text. A theme is one small JSON file.
 
 ## Quick start
 
-1. Web editor: open `http://<pi-ip>:8080/plugins/theme_manager/`, pick a theme, edit it with the tabs
-   (Colors, Effects, Text, Elements, Moods, Faces, JSON), type a name, press **Save**, then **Apply to screen**.
-   The preview updates live. See "The web editor" below.
+1. Web editor: open `http://<pi-ip>:8080/plugins/theme_manager/`. A fresh setup has **no themes installed** and shows
+   the plain pwnagotchi screen: open the **Gallery** tab, press **Install** on a theme you like (it shows a preview
+   first), then pick it and **Apply to screen**. Edit it with the tabs (Colors, Effects, Text, Elements, Structure,
+   Moods, Faces, JSON), type a name, press **Save**. The preview updates live. See "The web editor" below.
 2. Or by hand: `sudo /opt/.pwn/bin/python3 /etc/pwnagotchi/custom-plugins/theme_manager.py new mytheme`
    creates `/etc/pwnagotchi/themes/mytheme.json`. Edit it, check it, apply it:
 
@@ -18,7 +19,9 @@ sudo /opt/.pwn/bin/python3 /etc/pwnagotchi/custom-plugins/theme_manager.py set m
 
 The file name (without `.json`) is the theme name: letters, digits, `_`, `-` and spaces, max 32.
 Saved files are picked up live. If you edit the active theme's file, re-apply it (or save it from the web page).
-Built-in theme names can't be saved over or deleted, but you can copy them under a new name. They are `default`, `paper`,
+The bundled themes are installed from the Gallery (or `theme_manager.py install <name>`) and uninstalled the same way;
+they can't be saved over, but you can copy one under a new name. Your own saved themes are always installed. The bundled
+ones are `default`, `paper`,
 `matrix`, `amber`, `cyberpunk`, `vaporwave`, `blood`, `ice`, `gameboy`, `rainbow`, and the newer ones: `startrek`
 (a bridge console with a stardate), `lcars` (a ship's-computer instrument panel, no viewscreen), the seasons `spring`,
 `summer`, `autumn` and `winter`, the landscapes `mountain`, `ocean`, `forest`, `desert`, `aurora` and `volcano`, and
@@ -71,9 +74,43 @@ the plugin notices which pixels each element drew. Color images (face packs) are
 | `elements` | no | color per UI element, e.g. `{"face": "#ff2a6d", "status": "rainbow"}`, see "Element colors" |
 | `mood` | no | overrides that apply while pwnagotchi is in a mood, see "Moods" |
 | `face_pack`, `face_scale`, `face_offset`, `face_tint` | no | picture faces, see "Face packs" |
+| `layout`, `hide`, `sizes`, `panels` | no | change the layout of the screen itself, see "Structure" |
 | `faces` | no | replace face strings live, e.g. `"HAPPY": "(^o^)"`. Keys are the names in pwnagotchi's `faces.py` (LOOK_R, SLEEP, AWAKE, BORED, HAPPY, SAD, ...) |
 
 Colors are always 6-digit hex like `#00ff41`.
+
+## Structure
+
+Colors and effects change how the screen *looks*; these four fields change how it is *laid out*, so two themes can
+arrange the same pwnagotchi information in genuinely different ways.
+
+```json
+{
+  "layout": {"face": [113, 24], "name": [197, 121]},
+  "sizes":  {"face": 1.5},
+  "hide":   ["line1", "line2", "channel", "aps"],
+  "panels": [
+    {"type": "rect", "x": 108, "y": 60, "w": 264, "h": 116, "outline": "accent", "width": 2, "radius": 14},
+    {"type": "line", "x": 4, "y": 104, "x2": 475, "y2": 104, "color": "accent"}
+  ]
+}
+```
+
+| field | meaning |
+|---|---|
+| `layout` | `{element: [dx, dy]}`: move an element, in pixels, from where pwnagotchi puts it (max 200 either way). Anything you moved yourself on the Layout tab is added on top |
+| `sizes` | `{element: factor}` (0.4 to 3): bigger or smaller text. This scales the element's font, so it stays sharp; with a face pack it scales the face pack too |
+| `hide` | list of elements not to draw at all (a minimal theme drops the top bar; a console theme drops the plain lines and draws its own frame) |
+| `panels` | up to 24 boxes and lines drawn *behind* everything else. A `rect` has `x`, `y`, `w`, `h`, an optional `fill` and/or `outline`, `width` (1-8) and `radius` (rounded corners); a `line` has `x`, `y`, `x2`, `y2`, `color`, `width`. Colors are `#rrggbb`, or `fg`, `accent` or `bg`, which follow the theme's own palette (and its moods) |
+
+Element names are the ones on the web editor's Elements and Layout tabs (`face`, `name`, `status`, `shakes`, `mode`,
+`uptime`, `line1`, `line2`, and whatever your plugins add). A name you do not have -- a plugin that is not installed --
+is simply ignored, so a theme made on one setup still works on another.
+
+None of the bundled themes use these: they keep pwnagotchi's own layout and only change colors and effects. The two
+examples in `themes/` (`neon-hacker` and `sunset`) show what a structured theme looks like. The web editor's
+**Structure** tab edits all of this without writing JSON (hide/show, size and move per element, add and remove boxes and
+lines; use the JSON tab for exact panel colors), and the Gallery previews show a theme's real layout.
 
 ## Effects
 
@@ -262,17 +299,24 @@ Screen") and open it like an app, with its own icon instead of a browser tab.
 
 | tab | what it does |
 |---|---|
+| Gallery | the bundled themes with a live preview each, **Install** / **Uninstall**, a search box and filters (animated, scenery, dark, light, installed, not installed); plus an **Online** list of everything in the project's `themes/` folder on GitHub (your browser fetches it, and each theme is checked before it is saved as one of yours; a theme that needs a face pack brings it along) |
 | Colors | four color pickers, gradient on/off with from/to pickers and direction, animation fps |
 | Effects | checkbox per effect with sliders for its settings |
 | Text | edit each text line, insert placeholders, **drag the green boxes on the preview** to position lines |
 | Elements | one row per screen element with a color square, "rainbow" and "reset"; **click a part of the preview to pick it** |
+| Doctor | what looks wrong on this unit, in plain words, with what to do about it (see "The doctor") |
+| Structure | hide or show each element, make its text bigger or smaller, move it, and add boxes and lines behind everything (see "Structure") |
 | Moods | pick a mood, set overrides (including per-element colors, also clickable on the preview), preview it, or show it on the real screen for 15 seconds |
 | Faces | choose a face pack, scale, offset, tint, see every face in the pack |
 | JSON | the whole theme as text, changes apply as you type (red border = invalid JSON) |
 
-Buttons: **Save** stores the theme under the name in the box (built-in themes can't be overwritten: type a new name),
+**Share** (next to Export) opens GitHub's "new file" page with your theme's name and JSON already filled in, ready to
+commit as a pull request to the project's `themes/` folder -- that one file is all it takes for it to show up in
+everyone's Online list. (If the theme is too long for a link it says so; use Export and attach the file instead.)
+
+Buttons: **Save** stores the theme under the name in the box (bundled themes can't be overwritten: type a new name),
 **Apply to screen** saves if needed and makes it the active theme, **Export** downloads the JSON,
-**Import** loads a JSON file into the editor (press Save to keep it), **Delete** removes a custom theme.
+**Import** loads a JSON file into the editor (press Save to keep it), **Delete** removes a custom theme (or uninstalls a bundled one).
 
 **Try 30 s** shows the theme you are editing on the real screen for 30 seconds and then goes back to the saved one
 (the button counts down). Nothing is saved, so a bad idea can never be left on the screen; **Apply to screen** keeps it.
@@ -286,6 +330,24 @@ kept unless you tick "replace what is already there"; built-in names and anythin
 
 If the editor loses its session (for example after pwnagotchi restarts) it fetches a new one by itself and carries on.
 
+## The doctor
+
+Something is wrong more often than it looks, and the cause is rarely on screen. The **Doctor** (the web editor's Doctor
+tab, or the `doc` button on the touch menu's System tab, which lights up when there is something to see) looks at the log,
+the kernel messages, how the service has been behaving and the disk, and says in plain words what it found and what to
+do about it. It only reads; it never changes anything. It knows the failures that have actually happened on these units:
+
+| finding | what it looks at | what it tells you |
+|---|---|---|
+| pwnagotchi keeps restarting | the service's automatic restart count and age | something is crashing it; look at the other findings |
+| the WiFi driver is timing out | repeated brcmfmac errors in the kernel messages (last hour) | the chip is stuck: only a reboot fixes it, restarting pwnagotchi will not |
+| pwngrid-peer is not answering | timeouts talking to its local API in the log | restart it; if it repeats, its online enrollment may be hanging |
+| bt-tether cannot connect | repeated connection failures in the log | check tethering on the phone, or disable the plugin |
+| a plugin keeps logging errors | five or more errors from one plugin in the last hour | where to look |
+| the disk is (almost) full | free space on `/` | free some space |
+
+Everything is judged over the last hour, so an old problem stops being reported by itself.
+
 ## Touch menu
 
 Double tap the screen (two quick taps in about the same place) and a menu with all your themes appears. Tap a theme
@@ -296,7 +358,15 @@ The first time, the menu asks for a quick **touch calibration**: tap the four `+
 controller reports raw numbers, so this teaches the plugin where your screen is. It only needs doing once and is saved in
 `/etc/pwnagotchi/themes/touch.json`. Use the `calibrate` button in the menu (or delete `touch.json`) to redo it.
 
-The menu has eight tabs. **Themes** switches theme. **Plugins** lists every installed plugin with an `ON`/`OFF` switch: tap a
+The menu has eight tabs. **Themes** switches between the themes you have installed (with none installed it says so and
+points you at the store; swiping does nothing until there is something to switch to). The **store** button at the bottom
+opens the theme store: every bundled theme with its colors and an `install` / `installed` pill. Tap a theme to install
+it, tap an installed one to uninstall it, and `back` returns to your list. The first row is a **filter** -- tap it to
+step through all / animated / scenery / dark / light / not installed. A theme that uses a face pack downloads the pack
+along with itself (a toast says when it is ready; with no internet the theme still installs, just with the text face).
+In the store the calibrate button becomes **on phone**: it shows a QR code for this unit's web editor, opening straight on
+the Gallery, so you can browse and install from your phone. (Sharing your own theme and the online list are web-editor
+features.) **Plugins** lists every installed plugin with an `ON`/`OFF` switch: tap a
 row to enable or disable that plugin right away, exactly like the switch on the web plugin page (the change is saved in
 `config.toml` and lasts after a reboot). While a plugin is switching the row shows `...`; enabling one can take a few
 seconds. `theme_manager` itself is never listed, so you can't switch off the menu from the menu. Pwnagotchi rewrites

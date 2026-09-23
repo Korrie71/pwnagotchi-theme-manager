@@ -103,6 +103,7 @@ def new_manager():
     """A ThemeManager wired to a fake UI, with the side effects (drawing to a screen, saving) replaced."""
     ui, els = scene()
     tm = T.ThemeManager()
+    T._save_installed(set(T.BUILTIN))     # most tests want every bundled theme available; test_gallery covers the empty start
     tm._view = ui
     tm._wrap_elements(ui)
     tm._running = True
@@ -110,7 +111,7 @@ def new_manager():
     tm._apply = lambda name, persist=False: tm.applied.append(name)
     tm._refresh_now = lambda: tm.redraws.__setitem__(0, tm.redraws[0] + 1)
     tm._active = "cyberpunk"
-    tm._theme = T._clean(T.BUILTIN["cyberpunk"])
+    tm._theme = T._clean({k: v for k, v in T.BUILTIN["cyberpunk"].items() if k not in ("layout", "hide", "sizes", "panels")})   # the tests' fake screen is laid out as stock
     draw_pass(tm, ui, els)
     return tm, ui, els
 

@@ -34,7 +34,7 @@ els = {
     "line2": Line([0, 300, 480, 300], color=255),
     "face": Text(value=faces.AWAKE, position=(0, 34), color=255, font=fonts.Huge),
     "name": Text(value="pwnagotchi>", position=(10, 27), color=255, font=fonts.Bold),
-    "status": Text(value="Hey, let's go for a walk!", position=(286, 82), color=255, font=fonts.Medium, wrap=True, max_length=25),
+    "status": Text(value="Hey, let's go for a walk!", position=(70, 165), color=255, font=fonts.Medium, wrap=True, max_length=25),
     "shakes": LabeledValue(color=255, label="PWND ", value="4 (27)", position=(10, 300), label_font=fonts.Bold, text_font=fonts.Medium),
     "mode": Text(value="AUTO", position=(441, 303), color=255, font=fonts.Bold),
     "points": LabeledValue(color=255, label="Pts", value="1.2K", position=(320, 258), label_font=fonts.Bold, text_font=fonts.Medium),
@@ -68,10 +68,10 @@ def draw(face):
 def render(theme, face=None, mood=None, t=0.7, menu=None, notice=None):
     """One frame of `theme` (a built-in name or a theme dict) with the given face on screen."""
     face = face or faces.AWAKE
-    draw(face)
     th = T._clean(theme if isinstance(theme, dict) else T.BUILTIN[theme])
     effective = T.resolve(th, mood or T._mood_map().get(face))
-    manager._theme, manager._force = th, (None, 0)
+    manager._theme, manager._force = th, (None, 0)     # before drawing: a theme decides where the elements sit
+    draw(face)
     ctx = manager._ctx
     img = T.colorize(ctx["canvas"], effective, t, ctx["layers"], manager._face_frame(effective, t))
     if menu:

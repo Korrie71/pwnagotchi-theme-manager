@@ -18,6 +18,7 @@ class View:
 
 def manager(active="default"):
     tm = T.ThemeManager()
+    T._save_installed(set(T.BUILTIN))
     tm._view = View()
     tm._running = True
     tm._refresh_now = lambda: None

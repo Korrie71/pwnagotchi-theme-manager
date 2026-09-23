@@ -49,7 +49,21 @@ def cleanup(page_request=None):
             s.post(URL + "api/faces/delete", data=json.dumps({"pack": pack}), headers=h)
 
 
+def api_post(path, body):
+    s = requests.Session()
+    tok = re.search(r'name="csrf_token" content="([^"]+)"', s.get(URL).text).group(1)
+    return s.post(URL + "api/" + path, data=json.dumps(body), headers={"X-CSRFToken": tok, "Content-Type": "application/json"}).json()
+
+
+def library():
+    return requests.get(URL + "api/library").json()["themes"]
+
+
 original = api_themes()["active"]
+was_installed = {t["name"] for t in library() if t["installed"]}
+for t in library():                      # themes are installed before they can be used; the tests need the whole set
+    if not t["installed"]:
+        api_post("install", {"name": t["name"]})
 cleanup()
 with sync_playwright() as p:
     browser = p.chromium.launch()
@@ -359,6 +373,120 @@ with sync_playwright() as p:
           "1.23 km" in page.locator(".statcard").nth(0).inner_text() and "1" in page.locator(".statcard").nth(3).inner_text())
     page.unroute("**/api/wardrive/stop")
 
+
+    # ---------------------------------------------------------------- gallery: themes are installed before use
+    if "ice" in {t["name"] for t in library() if t["installed"]}:
+        api_post("uninstall", {"name": "ice"})
+    tab("Gallery")
+    page.wait_for_selector("img[alt='ice']")
+    cards = page.locator("#panel img[alt]").count()
+    check("the Gallery lists every bundled theme with a preview", cards == len(library()), cards)
+    page.wait_for_function("[...document.querySelectorAll('#panel img[alt]')].slice(0, 4).every(i => i.complete && i.naturalWidth > 0)", timeout=20000)
+    check("...and the previews actually load", True)
+    ice = page.locator("#panel div:has(> img[alt='ice'])")
+    check("a theme that is not installed offers Install", ice.locator("button").inner_text() == "Install")
+    ice.locator("button").click()
+    page.wait_for_function("document.querySelector(\"#panel div:has(> img[alt='ice']) button\").textContent==='Uninstall'")
+    check("installing it puts it in the theme list", page.locator(".card[data-name='ice']").count() == 1 and "ice" in api_themes()["themes"])
+    ice.locator("button").click()
+    page.wait_for_function("document.querySelector(\"#panel div:has(> img[alt='ice']) button\").textContent==='Install'")
+    check("uninstalling takes it out again", page.locator(".card[data-name='ice']").count() == 0 and "ice" not in api_themes()["themes"])
+
+    # ---------------------------------------------------------------- the first boot: nothing installed yet
+    page2 = ctx.new_page()
+    page2.route("**/api/themes", lambda r: r.fulfill(body=json.dumps({"active": "", "themes": {}, "stock": api_themes()["stock"]}), content_type="application/json"))
+    page2.goto(URL)
+    page2.wait_for_selector("#grid p")
+    check("with nothing installed the editor says so instead of showing a list", "No themes installed" in page2.inner_text("#grid"))
+    page2.wait_for_selector("img[alt='ice']")
+    check("...and opens straight on the Gallery", page2.locator("#tabs button.on").inner_text() == "Gallery")
+    page2.click("#tabs button:text-is('Colors')")
+    page2.wait_for_timeout(300)
+    check("...while the editor still works from a plain starting point", page2.locator("#panel").count() == 1 and page2.input_value("#name") == "")
+    page2.close()
+
+    # ---------------------------------------------------------------- structure: hide, resize, move, and panels
+    editing = lambda: page.evaluate("JSON.stringify(prune(clone(cur)))")
+    page.click(".card[data-name='cyberpunk']")
+    tab("Structure")
+    page.wait_for_selector("#panel .erow")
+    check("the Structure tab lists the elements on the screen", page.locator("#panel .erow:has-text('face')").count() >= 1)
+    row = page.locator("#panel .erow", has_text="uptime").first
+    row.locator("input[type=checkbox]").uncheck()
+    page.wait_for_timeout(300)
+    check("unchecking 'show' hides the element in the theme", json.loads(editing()).get("hide") == ["uptime"])
+    page.locator("#panel button:text-is('Add a box')").click()
+    page.wait_for_timeout(300)
+    check("adding a box adds a panel to the theme", '"panels"' in editing() and '"rect"' in editing())
+    n_panels = lambda: len(json.loads(editing()).get("panels", []))
+    before = n_panels()
+    page.locator("#panel button:text-is('Add a line')").click()
+    page.wait_for_timeout(300)
+    check("adding a line adds another panel", n_panels() == before + 1)
+    page.locator("#panel .erow button:text-is('remove')").first.click()
+    page.wait_for_timeout(300)
+    check("a panel can be removed again", n_panels() == before)
+    page.click("#tabs button:text-is('Colors')")
+    page.wait_for_timeout(200)
+    page.wait_for_function("document.getElementById('prev').naturalWidth>0")
+    check("the preview still renders with the structure applied", page.evaluate("document.getElementById('prev').naturalWidth") > 0)
+
+    # ---------------------------------------------------------------- the online catalog (fetched by the browser)
+    listing = [{"name": "zz-e2e-online.json"}, {"name": "bad name!.json"}, {"name": "../../etc/passwd.json"}, {"name": "readme.md"}]
+    theme_json = {"description": "an e2e theme", "bg": "#101010", "fg": "#eeeeee", "accent": "#22aa88", "web": "#22aa88", "layout": {"name": [20, 20]}, "hide": ["uptime"]}
+    page.route("https://api.github.com/**/contents/themes", lambda r: r.fulfill(body=json.dumps(listing), content_type="application/json", headers={"access-control-allow-origin": "*"}))
+    page.route("https://raw.githubusercontent.com/**/themes/zz-e2e-online.json", lambda r: r.fulfill(body=json.dumps(theme_json), content_type="application/json", headers={"access-control-allow-origin": "*"}))
+    tab("Gallery")
+    page.wait_for_selector("button:text-is('Check for more themes')")
+    page.click("button:text-is('Check for more themes')")
+    page.wait_for_selector("#panel .erow:has-text('zz-e2e-online')")
+    check("the online list shows what is in the project's themes folder, with each theme's description", "an e2e theme" in page.inner_text("#panel .erow:has-text('zz-e2e-online')"))
+    check("...and ignores entries with an unsafe name or that are not themes", page.locator("#panel .erow:has-text('bad name')").count() == 0 and page.locator("#panel .erow:has-text('passwd')").count() == 0 and page.locator("#panel .erow:has-text('readme')").count() == 0)
+    page.locator("#panel .erow:has-text('zz-e2e-online') button").click()
+    wait_msg("installed zz-e2e-online")
+    saved = api_themes()["themes"].get("zz-e2e-online", {})
+    check("installing one saves it as one of your own themes, structure included", saved.get("hide") == ["uptime"] and saved.get("layout") == {"name": [20, 20]})
+    page.unroute("https://api.github.com/**/contents/themes")
+    page.unroute("https://raw.githubusercontent.com/**/themes/zz-e2e-online.json")
+
+    # ---------------------------------------------------------------- Share: a GitHub page with the theme filled in
+    tab("Colors")
+    page.fill("#name", "zz-e2e-share")
+    page.evaluate("window.__opened = []; window.open = (u) => { window.__opened.push(u); return null }")
+    page.click("#share")
+    page.wait_for_timeout(500)
+    urls_opened = page.evaluate("window.__opened")
+    check("Share opens GitHub's new-file page with the file name and the theme filled in",
+          any(u and "github.com/Korrie71/pwnagotchi-theme-manager/new/main/themes" in u and "filename=zz-e2e-share.json" in u and "value=" in u
+              for u in urls_opened))
+    page.fill("#name", "")
+    page.click("#share")
+    page.wait_for_timeout(300)
+    check("...and asks for a name first", "name" in msg().lower())
+
+    # ---------------------------------------------------------------- gallery search and filters, and the doctor
+    tab("Gallery")
+    page.wait_for_selector("#galq")
+    total = page.locator("#panel img[alt]").count()
+    visible = lambda: page.evaluate("[...document.querySelectorAll('#panel div[data-tags]')].filter(c => c.style.display !== 'none').length")
+    page.fill("#galq", "ocean")
+    page.wait_for_timeout(200)
+    check("searching the gallery narrows it to what matches", visible() == 1 and visible() < total)
+    page.fill("#galq", "")
+    page.select_option("#galk", "animated")
+    page.wait_for_timeout(200)
+    check("the 'animated' filter shows only animated themes", 0 < visible() < total)
+    page.select_option("#galk", "not installed")
+    page.wait_for_timeout(200)
+    check("'not installed' matches the installed state the buttons show",
+          visible() == page.evaluate("[...document.querySelectorAll('#panel div[data-tags] button')].filter(b => b.textContent === 'Install').length"))
+    page.select_option("#galk", "all")
+    tab("Doctor")
+    page.wait_for_selector("button:text-is('Check now')")
+    page.wait_for_function("document.querySelector('#panel').innerText.includes('All good') || document.querySelectorAll('#panel .erow').length > 0", timeout=20000)
+    check("the Doctor tab reports either all good or a list of findings, each with what to do", True)
+    check("...and the findings offer advice", "All good" in page.inner_text("#panel") or " — " in page.inner_text("#panel .erow"))
+
     settings0 = requests.get(URL + "api/settings").json()
     tab("Settings")
     page.wait_for_selector("#setsave")
@@ -393,8 +521,15 @@ with sync_playwright() as p:
 cleanup()
 s = requests.Session()
 tok = re.search(r'name="csrf_token" content="([^"]+)"', s.get(URL).text).group(1)
-s.post(URL + "api/apply", data=json.dumps({"name": original}), headers={"X-CSRFToken": tok, "Content-Type": "application/json"})
-check("the original theme is active again (%s)" % original, api_themes()["active"] == original)
+if original:
+    s.post(URL + "api/apply", data=json.dumps({"name": original}), headers={"X-CSRFToken": tok, "Content-Type": "application/json"})
+for t in library():                      # put the installed set back the way it was
+    if t["installed"] and t["name"] not in was_installed:
+        api_post("uninstall", {"name": t["name"]})
+    elif not t["installed"] and t["name"] in was_installed:
+        api_post("install", {"name": t["name"]})
+check("the original theme is active again (%s)" % (original or "none"), api_themes()["active"] == original)
+check("the installed themes are back to what they were", {t["name"] for t in library() if t["installed"]} == was_installed)
 check("no throwaway themes or packs are left", not [n for n in api_themes()["themes"] if n.startswith("zz-e2e")]
       and not [p for p in requests.get(URL + "api/packs").json() if p.startswith("zz-e2e")])
 real = [e for e in console_errors if "favicon" not in e and "400" not in e]

@@ -4,7 +4,55 @@
   "fg": "#fff1c1",
   "accent": "#ff5e78",
   "web": "#ff5e78",
-  "gradient": {"from": "#1a0533", "to": "#8a2a3a", "direction": "vertical"},
-  "effects": [{"type": "pulse", "speed": 2, "strength": 0.25}, {"type": "vignette", "strength": 0.5}],
-  "text": [{"text": "golden hour {time}", "x": 240, "y": 270, "size": 12, "align": "center"}]
+  "gradient": {
+    "from": "#1a0533",
+    "to": "#8a2a3a",
+    "direction": "vertical"
+  },
+  "effects": [
+    {
+      "type": "pulse",
+      "speed": 2,
+      "strength": 0.25
+    },
+    {
+      "type": "vignette",
+      "strength": 0.5
+    }
+  ],
+  "text": [
+    {
+      "text": "golden hour {time}",
+      "x": 240,
+      "y": 270,
+      "size": 12,
+      "align": "center"
+    }
+  ],
+  "layout": {
+    "face": [
+      113,
+      20
+    ],
+    "name": [
+      197,
+      124
+    ],
+    "status": [
+      107,
+      10
+    ]
+  },
+  "panels": [
+    {
+      "type": "rect",
+      "x": 100,
+      "y": 56,
+      "w": 280,
+      "h": 120,
+      "outline": "accent",
+      "width": 2,
+      "radius": 18
+    }
+  ]
 }

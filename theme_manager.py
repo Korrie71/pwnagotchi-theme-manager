@@ -36,6 +36,7 @@ import hashlib
 import ipaddress
 import struct
 import textwrap
+import subprocess
 import threading
 import time
 import urllib.request
@@ -74,6 +75,7 @@ def trim_memory():
 
 THEME_DIR = os.environ.get("THEME_MANAGER_DIR", "/etc/pwnagotchi/themes")   # the variable is for testing
 ACTIVE_FILE = os.path.join(THEME_DIR, "active.json")
+LIBRARY_FILE = os.path.join(THEME_DIR, "library.json")   # which of the bundled themes have been installed
 DOCS_FILE = os.path.join(THEME_DIR, "README.md")
 NODES_FILE = os.path.join(THEME_DIR, "nodes.json")
 FRAME_PATH = "/var/tmp/pwnagotchi/pwnagotchi.png"
@@ -102,7 +104,7 @@ MOOD_FADE = 0.6    # seconds to blend between moods
 HANDSHAKE_FLASH = 4.0
 FORCE_FILE = os.path.join(THEME_DIR, "force_mood.json")
 FACES_DIR = os.path.join(THEME_DIR, "faces")
-STATE_FILES = ("active.json", "force_mood.json", "touch.json", "display.json", "settings.json", "achievements.json", "layout.json", "disclaimer.json", "home_watch.json")   # JSON files in THEME_DIR that are not themes
+STATE_FILES = ("active.json", "library.json", "force_mood.json", "touch.json", "display.json", "settings.json", "achievements.json", "layout.json", "disclaimer.json", "home_watch.json")   # JSON files in THEME_DIR that are not themes
 PACK_RE = re.compile(r"^[A-Za-z0-9_\-]{1,32}$")
 
 # Built-in themes. bg/fg/accent/web are required, everything else is optional.
@@ -302,6 +304,7 @@ BUILTIN = {
 }
 
 
+
 # ---------------------------------------------------------------- validation
 def write_json(path, obj, **kw):
     """Write atomically, so the plugin never reads a half-written file."""
@@ -393,6 +396,75 @@ def _clean_mood(m):
     return out
 
 
+PANELS_MAX = 24
+PANEL_TOKENS = ("fg", "accent", "bg")     # a panel can follow the theme's own palette, mood changes included
+
+
+def _panel_color(v, what):
+    return v if v in PANEL_TOKENS else _color(v, what)
+
+
+def _clean_panel(p):
+    """A decoration drawn behind the pwnagotchi elements: a box or a line that gives a theme its own structure."""
+    if not isinstance(p, dict) or p.get("type") not in ("rect", "line"):
+        raise ValueError("each panel needs a type: rect or line")
+    num = lambda k, lo, hi, d=0: int(_num(p.get(k, d), lo, hi, "panel.%s" % k))
+    if p["type"] == "line":
+        return {"type": "line", "x": num("x", -480, 960), "y": num("y", -320, 640), "x2": num("x2", -480, 960),
+                "y2": num("y2", -320, 640), "color": _panel_color(p.get("color", "fg"), "panel.color"), "width": num("width", 1, 8, 1)}
+    out = {"type": "rect", "x": num("x", -480, 960), "y": num("y", -320, 640), "w": num("w", 1, 960, 10), "h": num("h", 1, 640, 10),
+           "width": num("width", 1, 8, 1), "radius": num("radius", 0, 40)}
+    for k in ("fill", "outline"):
+        if p.get(k):
+            out[k] = _panel_color(p[k], "panel.%s" % k)
+    if "fill" not in out and "outline" not in out:
+        raise ValueError("a rect panel needs a fill or an outline")
+    return out
+
+
+def _clean_structure(theme, out):
+    """The parts of a theme that change the layout of the screen rather than its colors: where elements sit, which
+    are hidden, how big their text is, and the panels drawn behind them."""
+    layout = theme.get("layout")
+    if layout:
+        if not isinstance(layout, dict) or len(layout) > ELEMENTS_MAX:
+            raise ValueError("layout must be an object like {\"face\": [10, 20]}")
+        moved = {}
+        for k, v in layout.items():
+            if not KEY_RE.fullmatch(str(k)):
+                raise ValueError("bad element name %r" % k)
+            if not (isinstance(v, (list, tuple)) and len(v) == 2):
+                raise ValueError("layout.%s must be [dx, dy]" % k)
+            dx, dy = (int(_num(x, -LAYOUT_MAX, LAYOUT_MAX, "layout.%s" % k)) for x in v)
+            if dx or dy:
+                moved[str(k)] = [dx, dy]
+        if moved:
+            out["layout"] = moved
+    hide = theme.get("hide")
+    if hide:
+        if not isinstance(hide, list) or len(hide) > ELEMENTS_MAX or not all(KEY_RE.fullmatch(str(k)) for k in hide):
+            raise ValueError("hide must be a list of element names")
+        out["hide"] = sorted({str(k) for k in hide})
+    sizes = theme.get("sizes")
+    if sizes:
+        if not isinstance(sizes, dict) or len(sizes) > ELEMENTS_MAX:
+            raise ValueError("sizes must be an object like {\"face\": 1.5}")
+        scaled = {}
+        for k, v in sizes.items():
+            if not KEY_RE.fullmatch(str(k)):
+                raise ValueError("bad element name %r" % k)
+            v = _num(v, 0.4, 3.0, "sizes.%s" % k)
+            if abs(v - 1) > 0.01:
+                scaled[str(k)] = round(v, 2)
+        if scaled:
+            out["sizes"] = scaled
+    panels = theme.get("panels")
+    if panels:
+        if not isinstance(panels, list) or len(panels) > PANELS_MAX:
+            raise ValueError("panels must be a list of at most %d" % PANELS_MAX)
+        out["panels"] = [_clean_panel(p) for p in panels]
+
+
 def _clean(theme):
     try:
         return _clean_theme(theme)
@@ -453,6 +525,7 @@ def _clean_theme(theme):
         if not isinstance(faces, dict):
             raise ValueError("faces must be an object like {\"HAPPY\": \"(^o^)\"}")
         out["faces"] = {str(k).upper(): str(v) for k, v in faces.items()}
+    _clean_structure(theme, out)
     return out
 
 
@@ -1889,6 +1962,27 @@ def _noise(w, h, n):
     return _memo(("noise", w, h, n), (), make)
 
 
+def _draw_panels(img, theme):
+    """Decorative boxes and lines, behind everything else (they take the theme's own colors, so they follow it)."""
+    d = ImageDraw.Draw(img)
+    pal = {"fg": _hex(theme["fg"]), "accent": _hex(theme["accent"]), "bg": _hex(theme["bg"])}
+    col = lambda c: pal[c] if c in pal else _hex(c)
+    for p in theme["panels"]:
+        try:
+            if p["type"] == "line":
+                d.line((p["x"], p["y"], p["x2"], p["y2"]), fill=col(p["color"]), width=p["width"])
+            else:
+                box = (p["x"], p["y"], p["x"] + p["w"] - 1, p["y"] + p["h"] - 1)
+                fill = col(p["fill"]) if "fill" in p else None
+                outline = col(p["outline"]) if "outline" in p else None
+                if p["radius"]:
+                    d.rounded_rectangle(box, p["radius"], fill=fill, outline=outline, width=p["width"])
+                else:
+                    d.rectangle(box, fill=fill, outline=outline, width=p["width"])
+        except Exception as e:
+            logging.debug("[theme_manager] panel: %s", e)
+
+
 def colorize(canvas, theme, t=0.0, layers=None, face=None, bar_top=14, bar_bottom=300):
     """Turn the 1-bit pwnagotchi canvas into a themed RGB image at time t.
 
@@ -1899,6 +1993,8 @@ def colorize(canvas, theme, t=0.0, layers=None, face=None, bar_top=14, bar_botto
     hide = layers.get("face") if (face and layers) else None
     mask, ink_region, bars = _layers(canvas, w, h, bar_top, bar_bottom, hide)
     img = _scene_apply(theme, fx["scene"], w, h, t) if "scene" in fx else _base(theme, w, h)
+    if theme.get("panels"):
+        _draw_panels(img, theme)
 
     if "stars" in fx:
         _stars(img, w, h, t, fx["stars"], fg)
@@ -2046,6 +2142,42 @@ def make_backup():
                 if FACE_ENTRY.fullmatch("faces/%s/%s" % (pack, f)):
                     z.write(os.path.join(FACES_DIR, pack, f), "faces/%s/%s" % (pack, f))
     return buf.getvalue()
+
+
+PACK_RAW = "https://raw.githubusercontent.com/Korrie71/pwnagotchi-theme-manager/main/faces/"
+
+
+def _http_get(url, timeout=6):
+    """The bytes at a https:// address, or None if there is nothing there (or no network)."""
+    import urllib.error
+    import urllib.request
+    if not url.startswith("https://"):
+        return None
+    try:
+        with urllib.request.urlopen(urllib.request.Request(url, headers={"User-Agent": "theme_manager"}), timeout=timeout) as r:
+            return r.read(FACE_MAX_BYTES + 1)
+    except (urllib.error.URLError, OSError, ValueError):
+        return None
+
+
+def fetch_face_pack(pack):
+    """Download a face pack from the project's faces folder into the local face packs -- what a theme that needs one
+    brings along with it. Returns (faces added, problems). Every image goes through the same checks as an upload."""
+    if not PACK_RE.fullmatch(str(pack)):
+        raise ValueError("pack names use letters, digits, _ and - (max 32)")
+    added, problems = 0, []
+    for name in FACE_NAMES:
+        for ext in (".png", ".gif"):
+            data = _http_get("%s%s/%s%s" % (PACK_RAW, pack, name, ext))
+            if data is None:
+                continue
+            try:
+                store_face(pack, name + ext, data, overwrite=True)
+                added += 1
+                break
+            except ValueError as e:
+                problems.append(str(e))
+    return added, problems
 
 
 def store_face(pack, filename, data, overwrite=True):
@@ -2385,7 +2517,7 @@ def to_screen(m, x, y):
 
 def menu_items(menu):
     tab = menu.get("tab", "themes")
-    return {"themes": menu["names"], "awards": menu["awards"], "layout": menu["layout"],
+    return {"themes": menu["library"] if menu.get("store") else menu["names"], "awards": menu["awards"], "layout": menu["layout"],
             "crack": menu["crack"], "nodes": menu["nodes"]}.get(tab, menu["plugins"])
 
 
@@ -2427,15 +2559,20 @@ def menu_hits(menu):
         return adjust_hits(menu)
     if menu["mode"] == "wdmap":
         return [((380, 268, 452, 308), ("wdmapclose", None))]
+    if menu["mode"] == "doctor":
+        return [((380, 268, 452, 308), ("doctorclose", None))]
+    if menu["mode"] == "qr":
+        return [((380, 268, 452, 308), ("qrclose", None))]
     tab_names, left, right = tab_layout(menu.get("tab_scroll", 0))
     tabs = [(rect, ("tab", name)) for name, rect in tab_names]
     if left:
         tabs += [(left, ("tabscroll", -1)), (right, ("tabscroll", 1))]
-    common = [((220, 268, 320, 308), ("cal", None)), ((380, 268, 452, 308), ("close", None))] + tabs
+    phone = tab == "themes" and menu.get("store")      # in the store the calibrate slot shows the store on your phone
+    common = [((220, 268, 320, 308), ("phone" if phone else "cal", None)), ((380, 268, 452, 308), ("close", None))] + tabs
     if tab == "system":
         return [((28, 268, 118, 308), ("refresh", None)), ((124, 268, 214, 308), ("dim", None)),
                 ((28, 166, 176, 200), ("mode", None)), ((182, 166, 320, 200), ("overheat", None)),
-                ((326, 166, 452, 200), ("atkmode", None)), ((28, 208, 152, 248), ("power", "restart")),
+                ((326, 166, 452, 200), ("atkmode", None)), ((326, 268, 374, 308), ("doctor", None)), ((28, 208, 152, 248), ("power", "restart")),
                 ((158, 208, 282, 248), ("power", "reboot")), ((288, 208, 412, 248), ("power", "shutdown"))] + common
     if tab == "radar":
         hits = []
@@ -2443,11 +2580,13 @@ def menu_hits(menu):
             x, y = radar_pos(r["angle"], radar_radius_frac(r["rssi"]))
             hits.append(((x - 15, y - 15, x + 15, y + 15), ("radarblip", r["mac"])))
         return hits + common
-    act = {"themes": "pick", "awards": "award", "layout": "adjust", "crack": "crackrow", "nodes": "noderow"}.get(tab, "toggle")
+    act = {"themes": "storerow" if menu.get("store") else "pick", "awards": "award", "layout": "adjust", "crack": "crackrow", "nodes": "noderow"}.get(tab, "toggle")
     hits = [((28, 44 + i * 44, 452, 44 + i * 44 + 40), (act, n))
             for i, n in enumerate(menu_items(menu)[page * MENU_ROWS:(page + 1) * MENU_ROWS])]
     if tab == "layout":
         hits.append(((326, 268, 374, 308), ("resetall", None)))
+    elif tab == "themes":
+        hits.append(((326, 268, 374, 308), ("store", None)))
     elif tab == "nodes":
         hits.append(((326, 268, 374, 308), ("scan", None)))
         for i, (rect, (_, arg)) in enumerate(hits):
@@ -2531,6 +2670,41 @@ def draw_wardrive_map(d, menu, fg, acc, line):
     d.text((416, 288), "close", font=_font(16, True), fill=fg, anchor="mm")
 
 
+def draw_qr_screen(img, d, menu, fg, acc, line):
+    """The store on your phone: a QR code for this unit's web editor, opening straight on the Gallery."""
+    url = menu.get("qr_url") or ""
+    d.text((240, 24), "Open the store on your phone", font=_font(16, True), fill=fg, anchor="mm")
+    try:
+        draw_qr(img, url, (110, 34, 370, 244))
+        d.text((240, 254), url.replace("http://", ""), font=_font(11), fill=fg, anchor="mm")
+    except ValueError:
+        d.text((240, 140), "no network address to show", font=_font(14), fill=fg, anchor="mm")
+    d.rounded_rectangle((380, 268, 452, 308), 8, fill=line, outline=acc, width=2)
+    d.text((416, 288), "back", font=_font(16, True), fill=fg, anchor="mm")
+
+
+def draw_doctor(d, menu, fg, acc, line):
+    """What the doctor found: each problem, what it saw, and what to do about it."""
+    res = menu.get("doctor") or {"status": "ok", "items": []}
+    d.text((240, 24), "Doctor", font=_font(16, True), fill=fg, anchor="mm")
+    if not res["items"]:
+        d.text((240, 140), "All good", font=_font(20, True), fill=acc, anchor="mm")
+        d.text((240, 172), "nothing wrong in the last hour", font=_font(13), fill=fg, anchor="mm")
+    y = 44
+    for it in res["items"][:4]:
+        bad = it["level"] == "bad"
+        d.ellipse((30, y + 5, 42, y + 17), fill=acc if bad else None, outline=acc, width=2)
+        d.text((52, y), it["title"], font=_font(15, True), fill=fg)
+        d.text((52, y + 19), it["detail"], font=_font(12), fill=fg)
+        hint = it["hint"] if len(it["hint"]) <= 64 else it["hint"][:63] + "\u2026"
+        d.text((52, y + 34), hint, font=_font(12), fill=_mixc(fg, (0, 0, 0), 0.35))
+        y += 56
+    if len(res["items"]) > 4:
+        d.text((240, 254), "+%d more in the web editor" % (len(res["items"]) - 4), font=_font(12), fill=fg, anchor="mm")
+    d.rounded_rectangle((380, 268, 452, 308), 8, fill=line, outline=acc, width=2)
+    d.text((416, 288), "close", font=_font(16, True), fill=fg, anchor="mm")
+
+
 def draw_menu(img, menu, theme):
     """Draw the menu (or the calibration prompt) onto an upright RGB frame."""
     d = ImageDraw.Draw(img)
@@ -2542,6 +2716,12 @@ def draw_menu(img, menu, theme):
     d.rectangle((16, 8, 464, 312), fill=panel, outline=acc, width=2)
     if menu["mode"] == "wdmap":
         draw_wardrive_map(d, menu, fg, acc, line)
+        return
+    if menu["mode"] == "doctor":
+        draw_doctor(d, menu, fg, acc, line)
+        return
+    if menu["mode"] == "qr":
+        draw_qr_screen(img, d, menu, fg, acc, line)
         return
     if menu["mode"] == "calib":
         i = menu["step"]
@@ -2559,6 +2739,9 @@ def draw_menu(img, menu, theme):
     if tab == "awards" and not menu.get("awards_on", True):
         d.text((240, 150), "Achievements are switched off", font=_font(16, True), fill=fg, anchor="mm")
         d.text((240, 178), "(Settings in the web editor, or settings.json)", font=_font(12), fill=_mixc(fg, bg, 0.4), anchor="mm")
+    if tab == "themes" and not menu["names"] and not menu.get("store"):
+        d.text((240, 130), "No themes installed", font=_font(18, True), fill=fg, anchor="mm")
+        d.text((240, 160), "Tap 'store' below to install one", font=_font(13), fill=_mixc(fg, bg, 0.4), anchor="mm")
     if tab == "layout" and not menu["layout"]:
         d.text((240, 150), "Nothing on the screen yet", font=_font(16, True), fill=fg, anchor="mm")
     if tab == "nodes" and len(menu.get("nodes", [])) <= 3:
@@ -2607,6 +2790,26 @@ def draw_menu(img, menu, theme):
             for j, key in enumerate(("bg", "fg", "accent")):
                 sx = x1 - 78 + j * 24
                 d.rectangle((sx, y0 + 10, sx + 18, y1 - 10), fill=_hex(menu["colors"][arg][key]), outline=fg)
+        elif act == "storerow" and arg == "__filter__":
+            d.rectangle(rect, fill=line, outline=acc if menu.get("filter", "all") != "all" else line, width=2)
+            d.text((x0 + 12, (y0 + y1) // 2), "show: " + menu.get("filter", "all"), font=_font(18, True), fill=fg, anchor="lm")
+            d.text((x1 - 12, (y0 + y1) // 2), "%d theme%s \u25B8 tap to change" % (menu.get("shown", 0), "" if menu.get("shown") == 1 else "s"),
+                   font=_font(12), fill=_mixc(fg, bg, 0.3), anchor="rm")
+        elif act == "storerow":
+            have = arg in menu["installed"]
+            d.rectangle(rect, fill=line, outline=acc if have else line, width=2)
+            d.text((x0 + 12, (y0 + y1) // 2), arg, font=_font(20, have), fill=fg, anchor="lm")
+            for j, key in enumerate(("bg", "fg", "accent")):
+                sx = x1 - 190 + j * 22
+                d.rectangle((sx, y0 + 10, sx + 16, y1 - 10), fill=_hex(menu["lib_colors"][arg][key]), outline=fg)
+            px0, px1 = x1 - 112, x1 - 10
+            d.rounded_rectangle((px0, y0 + 7, px1, y1 - 7), 10, fill=panel if have else acc, outline=acc, width=2)
+            d.text(((px0 + px1) // 2, (y0 + y1) // 2), "installed" if have else "install", font=_font(14, True),
+                   fill=fg if have else bg, anchor="mm")
+        elif act == "store":
+            d.rectangle(rect, fill=acc if menu.get("store") else line, outline=acc, width=1)
+            d.text(((x0 + x1) // 2, (y0 + y1) // 2), "back" if menu.get("store") else "store", font=_font(14, True),
+                   fill=bg if menu.get("store") else fg, anchor="mm")
         elif act == "award":
             info = menu["award_info"][arg]
             done = info["unlocked"] is not None
@@ -2693,6 +2896,10 @@ def draw_menu(img, menu, theme):
             d.rectangle(rect, fill=acc if menu.get("nodes_scanning") else line, outline=acc, width=1)
             d.text(((x0 + x1) // 2, (y0 + y1) // 2), "scanning…" if menu.get("nodes_scanning") else "scan",
                    font=_font(14, True), fill=bg if menu.get("nodes_scanning") else fg, anchor="mm")
+        elif act == "doctor":
+            st = (menu.get("doctor") or {}).get("status", "ok")
+            d.rectangle(rect, fill=acc if st != "ok" else line, outline=acc, width=1)
+            d.text(((x0 + x1) // 2, (y0 + y1) // 2), "doc", font=_font(14, True), fill=bg if st != "ok" else fg, anchor="mm")
         elif act == "wdmap":
             pass   # a bigger, invisible tap target over the wardrive row -- already drawn by its "noderow" hit
         elif act == "toggle":
@@ -2704,7 +2911,7 @@ def draw_menu(img, menu, theme):
             d.text(((px0 + px1) // 2, (y0 + y1) // 2), "..." if busy else ("ERR" if bad else "ON" if on else "OFF"), font=_font(16, True),
                    fill=bg if on and not busy else fg, anchor="mm")
         else:
-            label = {"prev": "<", "next": "> %d/%d" % (page + 1, pages) if pages > 1 else ">", "cal": "calibrate", "close": "close", "refresh": "refresh",
+            label = {"prev": "<", "next": "> %d/%d" % (page + 1, pages) if pages > 1 else ">", "cal": "calibrate", "phone": "on phone", "close": "close", "refresh": "refresh",
                      "dim": "dim %d%%" % round(menu.get("dim", 1.0) * 100)}[act]
             d.rectangle(rect, fill=line, outline=acc, width=1)
             d.text(((x0 + x1) // 2, (y0 + y1) // 2), label, font=_font(16, True), fill=fg, anchor="mm")
@@ -2950,9 +3157,312 @@ def _pwa_icon(size, theme):
     return img
 
 
+def _load_installed():
+    """Names of the bundled themes that have been installed. Nothing is installed on a fresh setup: the screen stays
+    plain until a theme is chosen from the gallery."""
+    try:
+        with open(LIBRARY_FILE) as fp:
+            data = json.load(fp)
+        return {n for n in data.get("installed", []) if isinstance(n, str) and n in BUILTIN}
+    except (OSError, ValueError, AttributeError):
+        return set()
+
+
+def _save_installed(names):
+    os.makedirs(THEME_DIR, exist_ok=True)
+    write_json(LIBRARY_FILE, {"installed": sorted(n for n in names if n in BUILTIN)})
+
+
+STORE_FILTERS = ("all", "animated", "scenery", "dark", "light", "not installed")
+
+
+def store_filter(rows, kind):
+    """The store's rows narrowed to one kind: animated, with scenery, dark or light background, or not installed yet."""
+    keep = {"all": lambda r: True, "animated": lambda r: r["animated"], "scenery": lambda r: r["scene"],
+            "dark": lambda r: r["dark"], "light": lambda r: not r["dark"], "not installed": lambda r: not r["installed"]}
+    return [r for r in rows if keep.get(kind, keep["all"])(r)]
+
+
+STOCK = "stock"    # what the screen shows while no theme is installed/active: plain black and white, no effects
+
+
+# ------------------------------------------------------------------ a small QR code encoder
+# Byte mode, error correction level L, versions 1-6 (up to 134 bytes): enough for a link to this unit's web editor.
+_QR_VERSIONS = {1: (26, 7, 1, ()), 2: (44, 10, 1, (6, 18)), 3: (70, 15, 1, (6, 22)), 4: (100, 20, 1, (6, 26)),
+                5: (134, 26, 1, (6, 30)), 6: (172, 18, 2, (6, 34))}     # total codewords, ecc per block, blocks, alignment
+_GF_EXP, _GF_LOG = [0] * 512, [0] * 256
+_x = 1
+for _i in range(255):
+    _GF_EXP[_i], _GF_LOG[_x] = _x, _i
+    _x <<= 1
+    if _x & 0x100:
+        _x ^= 0x11D
+for _i in range(255, 512):
+    _GF_EXP[_i] = _GF_EXP[_i - 255]
+
+
+def _rs_ecc(data, n):
+    """The n Reed-Solomon error correction bytes for `data`."""
+    gen = [1]
+    for i in range(n):
+        nxt = [0] * (len(gen) + 1)
+        for j, c in enumerate(gen):
+            nxt[j] ^= c
+            if c:
+                nxt[j + 1] ^= _GF_EXP[_GF_LOG[c] + i]
+        gen = nxt
+    rem = [0] * n
+    for b in data:
+        f = b ^ rem[0]
+        rem = rem[1:] + [0]
+        if f:
+            for j in range(n):
+                rem[j] ^= _GF_EXP[(_GF_LOG[gen[j + 1]] + _GF_LOG[f]) % 255] if gen[j + 1] else 0
+    return rem
+
+
+def _qr_penalty(m):
+    n, score = len(m), 0
+    for grid in (m, [list(r) for r in zip(*m)]):
+        for row in grid:
+            run = 1
+            for i in range(1, n):
+                if row[i] == row[i - 1]:
+                    run += 1
+                else:
+                    score += run - 2 if run >= 5 else 0
+                    run = 1
+            score += run - 2 if run >= 5 else 0
+            bits = "".join("1" if v else "0" for v in row)
+            score += 40 * (bits.count("10111010000") + bits.count("00001011101"))
+    for y in range(n - 1):
+        for x in range(n - 1):
+            if m[y][x] == m[y][x + 1] == m[y + 1][x] == m[y + 1][x + 1]:
+                score += 3
+    dark = sum(sum(1 for v in r if v) for r in m) * 100 // (n * n)
+    return score + 10 * (abs(dark - 50) // 5)
+
+
+def qr_matrix(text):
+    """A QR code for `text` as rows of booleans (True = dark), without the quiet zone. ValueError if it is too long."""
+    data = text.encode("utf-8")
+    ver = next((v for v in _QR_VERSIONS if len(data) <= _QR_VERSIONS[v][0] - _QR_VERSIONS[v][1] * _QR_VERSIONS[v][2] - 2), None)
+    if ver is None:
+        raise ValueError("too long for a QR code here")
+    total, ecc_n, blocks, align = _QR_VERSIONS[ver]
+    ndata = total - ecc_n * blocks
+    bits = "0100" + format(len(data), "08b") + "".join(format(b, "08b") for b in data)
+    bits += "0" * min(4, ndata * 8 - len(bits))
+    bits += "0" * (-len(bits) % 8)
+    cw = [int(bits[i:i + 8], 2) for i in range(0, len(bits), 8)]
+    pad = 0
+    while len(cw) < ndata:
+        cw.append((0xEC, 0x11)[pad % 2])
+        pad += 1
+    per = ndata // blocks
+    blks = [cw[i * per:(i + 1) * per] for i in range(blocks)]
+    eccs = [_rs_ecc(b, ecc_n) for b in blks]
+    final = [b[i] for i in range(per) for b in blks] + [e[i] for i in range(ecc_n) for e in eccs]
+    stream = "".join(format(b, "08b") for b in final)
+    n = 17 + 4 * ver
+    base = [[False] * n for _ in range(n)]
+    func = [[False] * n for _ in range(n)]
+
+    def put(x, y, v):
+        base[y][x], func[y][x] = v, True
+
+    for cx, cy in ((3, 3), (n - 4, 3), (3, n - 4)):                     # finder patterns with their separators
+        for dy in range(-4, 5):
+            for dx in range(-4, 5):
+                x, y = cx + dx, cy + dy
+                if 0 <= x < n and 0 <= y < n:
+                    put(x, y, max(abs(dx), abs(dy)) not in (2, 4) and max(abs(dx), abs(dy)) <= 3)
+    for i in range(n):                                                    # timing patterns
+        if not func[6][i]:
+            put(i, 6, i % 2 == 0)
+        if not func[i][6]:
+            put(6, i, i % 2 == 0)
+    for cy in align:
+        for cx in align:
+            if func[cy][cx]:
+                continue
+            for dy in range(-2, 3):
+                for dx in range(-2, 3):
+                    put(cx + dx, cy + dy, max(abs(dx), abs(dy)) != 1)
+    put(8, n - 8, True)                                                   # the always-dark module
+    for i in range(9):                                                    # reserve the format information
+        for x, y in ((i, 8), (8, i)):
+            if not func[y][x]:
+                put(x, y, False)
+    for i in range(8):
+        for x, y in ((n - 1 - i, 8), (8, n - 1 - i)):
+            if not func[y][x]:
+                put(x, y, False)
+    order, up, x = [], True, n - 1
+    while x > 0:
+        if x == 6:
+            x -= 1
+        for yy in (range(n - 1, -1, -1) if up else range(n)):
+            for xx in (x, x - 1):
+                if not func[yy][xx]:
+                    order.append((xx, yy))
+        up, x = not up, x - 2
+    masks = [lambda r, c: (r + c) % 2 == 0, lambda r, c: r % 2 == 0, lambda r, c: c % 3 == 0, lambda r, c: (r + c) % 3 == 0,
+             lambda r, c: (r // 2 + c // 3) % 2 == 0, lambda r, c: r * c % 2 + r * c % 3 == 0,
+             lambda r, c: (r * c % 2 + r * c % 3) % 2 == 0, lambda r, c: ((r + c) % 2 + r * c % 3) % 2 == 0]
+    best = None
+    for mi, mask in enumerate(masks):
+        m = [row[:] for row in base]
+        for i, (xx, yy) in enumerate(order):
+            bit = i < len(stream) and stream[i] == "1"
+            m[yy][xx] = bit != mask(yy, xx)
+        fmt = (0b01 << 3) | mi                                           # level L = 01
+        rem = fmt << 10
+        for i in range(4, -1, -1):
+            if rem >> (i + 10) & 1:
+                rem ^= 0x537 << i
+        fmt = ((fmt << 10) | rem) ^ 0x5412
+        for i in range(15):                                              # the format bits, in both places
+            v = bool(fmt >> i & 1)
+            m[i if i < 6 else i + 1 if i < 8 else n - 15 + i][8] = v
+            m[8][n - 1 - i if i < 8 else 7 if i < 9 else 14 - i] = v
+        m[n - 8][8] = True
+        score = _qr_penalty(m)
+        if best is None or score < best[0]:
+            best = (score, m)
+    return best[1]
+
+
+def draw_qr(img, text, box, dark=(0, 0, 0), light=(255, 255, 255)):
+    """Draw the QR code for `text` centered in box (x0, y0, x1, y1) with a quiet zone, as large as fits in whole pixels."""
+    m = qr_matrix(text)
+    n = len(m)
+    size = min(box[2] - box[0], box[3] - box[1])
+    cell = max(1, size // (n + 8))
+    side = cell * (n + 8)
+    ox, oy = (box[0] + box[2] - side) // 2, (box[1] + box[3] - side) // 2
+    d = ImageDraw.Draw(img)
+    d.rectangle((ox, oy, ox + side - 1, oy + side - 1), fill=light)
+    for y, row in enumerate(m):
+        for x, v in enumerate(row):
+            if v:
+                px, py = ox + (x + 4) * cell, oy + (y + 4) * cell
+                d.rectangle((px, py, px + cell - 1, py + cell - 1), fill=dark)
+
+
+# ------------------------------------------------------------------ doctor: what is going wrong on this unit
+DOCTOR_WINDOW_S = 3600
+DOCTOR_TTL_S = 20
+_LOG_LINE = re.compile(r"^\[(\d{4}-\d\d-\d\d \d\d:\d\d:\d\d)[,.]\d+\] \[(\w+)\] \[[^\]]*\] : (.*)$")
+
+
+def _log_events(text, now, window=DOCTOR_WINDOW_S):
+    """(level, message) for every pwnagotchi log line inside the window. Continuation lines (tracebacks) are skipped."""
+    out = []
+    for line in text.splitlines():
+        m = _LOG_LINE.match(line)
+        if not m:
+            continue
+        try:
+            when = time.mktime(time.strptime(m.group(1), "%Y-%m-%d %H:%M:%S"))
+        except (ValueError, OverflowError):
+            continue
+        if 0 <= now - when <= window:
+            out.append((m.group(2), m.group(3)))
+    return out
+
+
+def diagnose(now=None, log_text="", dmesg_lines=(), restarts=0, service_age=None, disk_free=None):
+    """What looks wrong, worked out from things every unit already has: the log, the kernel messages, how the service
+    has been behaving and the disk. Each finding names the problem and says what to do about it. Reads only."""
+    now = now or time.time()
+    events = _log_events(log_text, now)
+    items = []
+
+    def add(level, title, detail, hint):
+        items.append({"level": level, "title": title, "detail": detail, "hint": hint})
+
+    if restarts >= 3 and service_age is not None and service_age < 900:
+        add("bad", "pwnagotchi keeps restarting", "%d automatic restarts, the latest %d s ago" % (restarts, service_age),
+            "Something is crashing it. The other findings here are the likely cause; otherwise: journalctl -u pwnagotchi")
+    elif restarts >= 1 and service_age is not None and service_age < 300:
+        add("warn", "pwnagotchi restarted on its own", "%d automatic restart%s, the latest %d s ago" % (restarts, "" if restarts == 1 else "s", service_age),
+            "Once is usually fine; if it repeats, look at the other findings here")
+    wifi = sum(1 for l in dmesg_lines if "brcmf" in l and ("-110" in l or "failed" in l))
+    if wifi >= 5:
+        add("bad", "the WiFi driver is timing out", "%d driver errors in the last hour" % wifi,
+            "The WiFi chip is stuck; restarting pwnagotchi will not fix it, only a reboot does")
+    pw = sum(1 for _, m in events if "port=8666" in m and "timed out" in m.lower())
+    if pw >= 2:
+        add("bad", "pwngrid-peer is not answering", "%d timeouts talking to it in the last hour" % pw,
+            "Restart it: sudo systemctl restart pwngrid-peer. If it keeps happening, its online enrollment may be hanging")
+    bt = sum(1 for _, m in events if "bt-tether" in m and ("Connection failed" in m or "setup incomplete" in m))
+    if bt >= 3:
+        add("warn", "bt-tether cannot connect", "%d failed attempts in the last hour" % bt,
+            "Check that tethering is switched on on the phone, or disable the bt-tether plugin")
+    counts = {}
+    for level, m in events:
+        if level != "ERROR" or "port=8666" in m or "bt-tether" in m:
+            continue
+        tag = re.match(r"\[([^\]]{1,30})\]|([A-Za-z][\w-]{1,20}):", m)     # "[plugin] ..." or "plugin: ..."
+        name = (tag.group(1) or tag.group(2)) if tag else "pwnagotchi itself"
+        counts[name] = counts.get(name, 0) + 1
+    for tag, n in sorted(counts.items(), key=lambda kv: -kv[1])[:3]:
+        if n >= 5:
+            add("warn", "%s keeps logging errors" % tag, "%d errors in the last hour" % n, "See /etc/pwnagotchi/log/pwnagotchi.log")
+    if disk_free is not None:
+        if disk_free < 0.03:
+            add("bad", "the disk is almost full", "%d%% free" % round(disk_free * 100), "Free some space (old handshakes, backups, logs)")
+        elif disk_free < 0.10:
+            add("warn", "the disk is getting full", "%d%% free" % round(disk_free * 100), "Free some space soon (old handshakes, backups, logs)")
+    status = "bad" if any(i["level"] == "bad" for i in items) else "warn" if items else "ok"
+    return {"status": status, "items": items, "checked_at": now}
+
+
+def _doctor_inputs():
+    """The real sources for diagnose(); each one that cannot be read is just left out."""
+    out = {"log_text": "", "dmesg_lines": [], "restarts": 0, "service_age": None, "disk_free": None}
+    try:
+        import pwnagotchi
+        path = pwnagotchi.config["main"]["log"]["path"]
+    except Exception:
+        path = "/etc/pwnagotchi/log/pwnagotchi.log"
+    try:
+        with open(path, "rb") as fp:
+            fp.seek(0, 2)
+            fp.seek(max(0, fp.tell() - 1500000))
+            out["log_text"] = fp.read().decode("utf-8", "replace")
+    except OSError:
+        pass
+    try:
+        with open("/proc/uptime") as fp:
+            up = float(fp.read().split()[0])
+        r = subprocess.run(["dmesg"], capture_output=True, text=True, timeout=3)
+        lines = []
+        for l in r.stdout.splitlines():
+            m = re.match(r"\[\s*(\d+\.\d+)\]", l)
+            if m and up - float(m.group(1)) <= DOCTOR_WINDOW_S:
+                lines.append(l)
+        out["dmesg_lines"] = lines
+        r = subprocess.run(["systemctl", "show", "pwnagotchi", "-p", "NRestarts", "-p", "ActiveEnterTimestampMonotonic"],
+                           capture_output=True, text=True, timeout=3)
+        kv = dict(l.split("=", 1) for l in r.stdout.splitlines() if "=" in l)
+        out["restarts"] = int(kv.get("NRestarts") or 0)
+        mono = int(kv.get("ActiveEnterTimestampMonotonic") or 0)
+        out["service_age"] = up - mono / 1e6 if mono else None
+    except (OSError, ValueError, subprocess.SubprocessError):
+        pass
+    try:
+        st = os.statvfs("/")
+        out["disk_free"] = st.f_bavail / st.f_blocks if st.f_blocks else None
+    except OSError:
+        pass
+    return out
+
+
 class ThemeManager(plugins.Plugin):
     __author__ = "theme_manager contributors"
-    __version__ = "2.18.0"
+    __version__ = "3.0.0"
     __license__ = "GPL3"
     __description__ = "Theme engine for the 3.5 inch display: colors, effects, animations, custom text, web GUI."
 
@@ -2998,7 +3508,12 @@ class ThemeManager(plugins.Plugin):
         self._ach_last = 0
         self._settings = clean_settings({})
         self._settings_mtime = 0
+        self._doctor = (0, None)
+        self._pack_lock = threading.Lock()
+        self._pack_busy = set()
+        self._doctor_busy = threading.Lock()
         self._layout = {}
+        self._draw_lock = threading.RLock()
         self._hot_since = 0
         self._shutdown_at = 0
         self._snooze_until = 0
@@ -3040,7 +3555,7 @@ class ThemeManager(plugins.Plugin):
         self._rot = 0
         self._full_at = 0
         self._fast = False
-        self._active = "default"
+        self._active = ""
         self._theme = _clean(BUILTIN["default"])
         self._mtime = 0
         self._last_check = 0
@@ -3060,9 +3575,89 @@ class ThemeManager(plugins.Plugin):
         return themes
 
     def _all(self):
-        t = {k: dict(_clean(v), builtin=True) for k, v in BUILTIN.items()}
+        """The themes that are installed: the bundled ones you chose from the gallery, plus your own files."""
+        have = _load_installed()
+        t = {k: dict(_clean(v), builtin=True) for k, v in BUILTIN.items() if k in have}
         t.update(self._user_themes())
         return t
+
+    def library_rows(self):
+        """Every bundled theme, with whether it is installed yet -- the gallery."""
+        have = _load_installed()
+        rows = []
+        for n, t in BUILTIN.items():
+            c = _clean(t)
+            r, g, b = _hex(c["bg"])
+            rows.append({"name": n, "installed": n in have, "bg": c["bg"], "fg": c["fg"], "accent": c["accent"], "web": c["web"],
+                         "animated": is_animated(c), "scene": any(e["type"] == "scene" for e in c.get("effects", [])),
+                         "dark": (0.299 * r + 0.587 * g + 0.114 * b) < 100, "pack": c.get("face_pack"),
+                         "description": t.get("description", "")})
+        return rows
+
+    def install_theme(self, name):
+        """Install a bundled theme; if it uses a face pack this unit does not have yet, that comes along too."""
+        if name not in BUILTIN:
+            return False
+        _save_installed(_load_installed() | {name})
+        pack = BUILTIN[name].get("face_pack")
+        if pack:
+            self.ensure_face_pack(pack)
+        return True
+
+    def ensure_face_pack(self, pack):
+        """Make sure a theme's face pack is here, downloading it in the background (never on the touch, drawing or web
+        thread) if not. Returns True if a download was started."""
+        if not pack or os.path.isdir(os.path.join(FACES_DIR, pack)):
+            return False
+        with self._pack_lock:
+            if pack in self._pack_busy:
+                return False
+            self._pack_busy.add(pack)
+
+        def run():
+            try:
+                self.toast("downloading the %s faces..." % pack, seconds=3)
+                added, problems = fetch_face_pack(pack)
+                self.toast(("%s faces ready (%d)" % (pack, added)) if added else "could not download the %s faces" % pack, seconds=4)
+                for p in problems[:3]:
+                    logging.warning("[theme_manager] face pack %s: %s", pack, p)
+            except Exception as e:
+                logging.warning("[theme_manager] face pack %s: %s", pack, e)
+                self.toast("could not download the %s faces" % pack, seconds=4)
+            finally:
+                with self._pack_lock:
+                    self._pack_busy.discard(pack)
+                self._wake.set()
+
+        threading.Thread(target=run, daemon=True, name="theme-facepack").start()
+        return True
+
+    def uninstall_theme(self, name):
+        """Remove a bundled theme from the installed set. If it was the active one the screen goes back to plain."""
+        if name not in BUILTIN or name not in _load_installed():
+            return False
+        _save_installed(_load_installed() - {name})
+        if self._active == name:
+            self._deactivate(persist=True)
+        return True
+
+    def _deactivate(self, persist=False):
+        """No theme: the plain black-and-white screen, no effects."""
+        with self._lock:
+            self._active = ""
+            self._theme = _clean(BUILTIN["default"])
+            self._trans = None
+            self._mood = None
+        self._apply_web(self._theme)
+        self._apply_faces(self._theme)
+        if persist:
+            self._save_active("")
+        if self._view:
+            try:
+                self._view.update(force=True)
+            except Exception as e:
+                logging.debug("[theme_manager] refresh failed: %s", e)
+        logging.info("[theme_manager] no theme active")
 
     def _save_active(self, name):
         os.makedirs(THEME_DIR, exist_ok=True)
@@ -3118,10 +3713,13 @@ class ThemeManager(plugins.Plugin):
     def _end_try(self):
         self._try_until = 0
         try:
-            self._apply(self._active)
+            if self._active:
+                self._apply(self._active)
+            else:
+                self._deactivate()
         except KeyError:                       # the saved theme was deleted meanwhile
-            self._apply("default")
-        self.toast("back to " + self._active)
+            self._deactivate()
+        self.toast("back to " + (self._active or "no theme"))
         self._refresh_now()
 
     def _apply_web(self, theme):
@@ -3177,8 +3775,8 @@ class ThemeManager(plugins.Plugin):
                 with open(ACTIVE_FILE) as fp:
                     name = json.load(fp).get("active")
                 self._mtime = m
-                if name and name != self._active:
-                    self._apply(name)
+                if name != self._active:
+                    self._apply(name) if name else self._deactivate()
         except (FileNotFoundError, ValueError):
             pass  # missing, or caught mid-write: try again on the next tick
         except Exception as e:
@@ -3197,37 +3795,86 @@ class ThemeManager(plugins.Plugin):
             if getattr(elem, "_tm_wrapped", False) or not callable(getattr(elem, "draw", None)):
                 continue
 
+            elem._tm_orig = elem.draw
+
             def wrapped(canvas, drawer, _orig=elem.draw, _key=key, _elem=elem):
                 if canvas.mode != "1":
                     return _orig(canvas, drawer)
                 before = canvas.copy()
-                off = mgr._layout.get(_key)
-                home = _elem.xy
-                if off:
-                    try:
-                        _elem.xy = shifted(home, off[0], off[1])
-                    except Exception:
-                        off = None
-                try:
-                    _orig(canvas, drawer)
-                    mgr._capture(_key, _elem, before, canvas)
-                finally:
-                    if off:
-                        _elem.xy = home
+                mgr._draw_element(_key, _elem, _orig, canvas, drawer, mgr._theme,
+                                  lambda: mgr._capture(_key, _elem, before, canvas))
 
             elem.draw = wrapped
             elem._tm_wrapped = True
             self._wrapped.append(elem)
 
-    def _capture(self, key, elem, before, canvas):
+    def _draw_element(self, key, elem, orig, canvas, drawer, theme, after):
+        """Draw one element the way this theme lays the screen out: not at all if the theme hides it, moved by the
+        theme's layout plus whatever you moved it by yourself, and with bigger or smaller text if the theme says so.
+        `after` runs while the element is still where it was drawn (that is when its pixels are captured)."""
+        if key in (theme.get("hide") or ()):
+            return
+        mine, theirs = self._layout.get(key), (theme.get("layout") or {}).get(key)
+        dx = (mine[0] if mine else 0) + (theirs[0] if theirs else 0)
+        dy = (mine[1] if mine else 0) + (theirs[1] if theirs else 0)
+        scale = (theme.get("sizes") or {}).get(key)
+        with self._draw_lock:
+            home, swapped = elem.xy, []
+            if dx or dy:
+                try:
+                    elem.xy = shifted(home, dx, dy)
+                except Exception:
+                    dx = dy = 0
+            if scale:
+                for attr in ("font", "text_font", "label_font"):
+                    f = getattr(elem, attr, None)
+                    try:
+                        setattr(elem, attr, f.font_variant(size=max(4, round(f.size * scale))))
+                        swapped.append((attr, f))
+                    except Exception:
+                        pass
+            try:
+                orig(canvas, drawer)
+                after()
+            finally:
+                for attr, f in swapped:
+                    setattr(elem, attr, f)
+                if dx or dy:
+                    elem.xy = home
+
+    def render_structure(self, theme):
+        """(canvas, layers, face) for the screen laid out the way `theme` wants it, redrawn from the live elements --
+        so a preview, or a theme in the gallery, shows its real layout and not just its colors. None before the UI
+        has drawn anything."""
+        ui, ctx = self._view, self._ctx
+        if ui is None or ctx is None:
+            return None
+        canvas = Image.new("1", ctx["canvas"].size, 0)
+        drawer = ImageDraw.Draw(canvas)
+        into = {"layers": {}, "face": None}
+        try:
+            items = list(ui._state.items())
+        except Exception:
+            return None
+        for key, elem in items:
+            orig = getattr(elem, "_tm_orig", None)
+            if orig is None:
+                continue
+            before = canvas.copy()
+            self._draw_element(key, elem, orig, canvas, drawer, theme,
+                               lambda k=key, e=elem, b=before: self._capture(k, e, b, canvas, into))
+        return canvas, into["layers"], into["face"]
+
+    def _capture(self, key, elem, before, canvas, into=None):
         """Remember which pixels the element just drew (and, for the face, where it is)."""
+        into = self._building if into is None else into
         try:
             changed = ImageChops.logical_and(ImageChops.logical_xor(before, canvas), canvas)
             box = changed.getbbox()
             if box:
-                self._building["layers"][key] = (changed.crop(box).convert("L"), box)
+                into["layers"][key] = (changed.crop(box).convert("L"), box)
             if key == "face":
-                self._building["face"] = (elem.value, tuple(elem.xy))
+                into["face"] = (elem.value, tuple(elem.xy))
         except Exception as e:
             logging.debug("[theme_manager] capture %s: %s", key, e)
 
@@ -3285,14 +3932,14 @@ class ThemeManager(plugins.Plugin):
         face = ctx["face"] if ctx else None
         return _mood_map().get(str(face[0])) if face else None
 
-    def _face_frame(self, theme, t, mood=None):
+    def _face_frame(self, theme, t, mood=None, ctx=None):
         """(image, position) for the theme's face pack at time t, or None to keep the drawn text face."""
         pack = theme.get("face_pack")
-        ctx = self._ctx
+        ctx = ctx or self._ctx
         if not pack or not ctx or not ctx["face"]:
             self._face_multi = False
             return None
-        scale = theme.get("face_scale", 1.0)
+        scale = theme.get("face_scale", 1.0) * (theme.get("sizes") or {}).get("face", 1.0)
         frames = pack_frames(pack, self.face_mood(t, mood) or "default", scale) or pack_frames(pack, "default", scale)
         if not frames:
             self._face_multi = False
@@ -3408,15 +4055,50 @@ class ThemeManager(plugins.Plugin):
                           "awards": [a[0] for a in ACHIEVEMENTS] if self._settings["achievements"] else [], "layout": [], "layout_info": {},
                           "crack": [], "crack_info": {}, "radar": [], "nodes": [], "nodes_info": {}, "nodes_scanning": False,
                           "wardrive": {}, "award_info": {r["id"]: r for r in self.award_rows()}, "plugins": self._plugin_names(),
-                          "on": set(plugins.loaded), "busy": set(), "failed": set(), "step": 0, "raw": [], "names": list(themes),
+                          "on": set(plugins.loaded), "busy": set(), "failed": set(), "step": 0, "raw": [], "names": list(themes), "store": False, "library": [], "installed": set(), "lib_colors": {}, "filter": "all", "shown": 0,
                           "colors": {n: t for n, t in themes.items()}, "active": self._active,
                           "until": now + (CALIB_TIMEOUT if mode == "calib" else MENU_TIMEOUT)}
+        self._sync_store_menu(self._menu)
         self._sync_layout_menu(self._menu)
         self._sync_crack_menu(self._menu)
         self._sync_radar_menu(self._menu)
         self._sync_nodes_menu(self._menu)
         self._wake.set()
         self._refresh_now()
+
+    def _doctor_kick(self):
+        """Refresh the doctor's findings in the background if they are stale (never on the drawing or touch thread)."""
+        at, result = self._doctor
+        if result is not None and time.time() - at <= DOCTOR_TTL_S:
+            return
+        if self._doctor_busy.acquire(blocking=False):
+            def run():
+                try:
+                    self.doctor(force=True)
+                finally:
+                    self._doctor_busy.release()
+            threading.Thread(target=run, daemon=True, name="theme-doctor").start()
+
+    def doctor(self, force=False):
+        """The doctor's findings, re-checked at most every few seconds (it reads a log and asks the kernel)."""
+        at, result = self._doctor
+        if force or result is None or time.time() - at > DOCTOR_TTL_S:
+            try:
+                result = diagnose(**_doctor_inputs())
+            except Exception as e:
+                logging.debug("[theme_manager] doctor: %s", e)
+                result = {"status": "ok", "items": [], "checked_at": time.time()}
+            self._doctor = (time.time(), result)
+        return result
+
+    def _sync_store_menu(self, menu):
+        """The theme list and the store (every bundled theme, installed or not), as the menu shows them."""
+        themes = self._all()
+        rows = self.library_rows()
+        shown = store_filter(rows, menu.get("filter", "all"))
+        menu.update(names=list(themes), colors={n: t for n, t in themes.items()}, active=self._active,
+                    library=["__filter__"] + [r["name"] for r in shown], installed={r["name"] for r in rows if r["installed"]},
+                    lib_colors={r["name"]: r for r in rows}, shown=len(shown))
 
     def _sync_radar_menu(self, menu):
         rows, _ = self.radar_rows()
@@ -4127,6 +4809,26 @@ class ThemeManager(plugins.Plugin):
                     except KeyError:
                         pass
                     return
+                elif act == "store":
+                    menu.update(store=not menu.get("store"), page=0)
+                    self._sync_store_menu(menu)
+                    self._refresh_now()
+                    return
+                elif act == "storerow" and arg == "__filter__":
+                    menu.update(filter=STORE_FILTERS[(STORE_FILTERS.index(menu.get("filter", "all")) + 1) % len(STORE_FILTERS)], page=0)
+                    self._sync_store_menu(menu)
+                    self._refresh_now()
+                    return
+                elif act == "storerow":
+                    if arg in menu["installed"]:
+                        ok_ = self.uninstall_theme(arg)
+                        self.toast(("uninstalled " if ok_ else "could not uninstall ") + arg, seconds=3, now=now)
+                    else:
+                        ok_ = self.install_theme(arg)
+                        self.toast(("installed " if ok_ else "could not install ") + arg, seconds=3, now=now)
+                    self._sync_store_menu(menu)
+                    self._refresh_now()
+                    return
                 elif act == "prev":
                     menu["page"] = (menu["page"] - 1) % pages
                 elif act == "next":
@@ -4224,6 +4926,35 @@ class ThemeManager(plugins.Plugin):
                         self.toast("not enough points yet for a route", seconds=3, now=now)
                     else:
                         menu.update(mode="wdmap")
+                    self._refresh_now()
+                    return
+                elif act == "doctor":
+                    if self._doctor[1] is None:
+                        self._doctor_kick()
+                        self.toast("checking... tap again in a moment", seconds=3, now=now)
+                    else:
+                        self._doctor_kick()
+                        menu["doctor"] = self._doctor[1]
+                        menu.update(mode="doctor")
+                    self._refresh_now()
+                    return
+                elif act == "phone":
+                    ip = _local_ip()
+                    try:
+                        import pwnagotchi
+                        port = int(pwnagotchi.config["ui"]["web"]["port"])
+                    except Exception:
+                        port = 8080
+                    menu["qr_url"] = "" if ip == "no ip" else "http://%s:%d/plugins/theme_manager/#gallery" % (ip, port)
+                    menu.update(mode="qr")
+                    self._refresh_now()
+                    return
+                elif act == "qrclose":
+                    menu.update(mode="list")
+                    self._refresh_now()
+                    return
+                elif act == "doctorclose":
+                    menu.update(mode="list")
                     self._refresh_now()
                     return
                 elif act == "wdmapclose":
@@ -4371,6 +5102,8 @@ class ThemeManager(plugins.Plugin):
         menu["atkmode"] = self._settings.get("mode", "aggressive")
         menu["lines"] = [_expand(t) for t in STATUS_LINES]
         menu["mode_now"] = self._agent_mode()
+        menu["doctor"] = self._doctor[1]
+        self._doctor_kick()
 
     def _do_system(self, key):
         """restart / reboot / shutdown / switch mode: the same pwnagotchi calls the web UI makes, run off the touch thread."""
@@ -4566,6 +5299,8 @@ class ThemeManager(plugins.Plugin):
         if abs(dx) < SWIPE_PX or abs(dy) * 2 > abs(dx):
             return
         names = list(self._all())
+        if not names:
+            return
         idx = names.index(self._active) if self._active in names else 0
         name = names[(idx + (-1 if dx > 0 else 1)) % len(names)]
         self._last_swipe = now
@@ -4670,10 +5405,29 @@ class ThemeManager(plugins.Plugin):
             time.sleep(min(1.0, max(0.03, iv - (time.time() - start))))
 
     # ---- hooks
-    def on_loaded(self):
+    def _migrate_library(self):
+        """First run after themes became something you install: keep whatever an existing setup was using, so an
+        update never changes anyone's screen. A fresh setup (no active.json) starts with nothing installed."""
+        if os.path.exists(LIBRARY_FILE):
+            return
+        keep = set()
         try:
             with open(ACTIVE_FILE) as fp:
-                name = json.load(fp).get("active", "default")
+                name = json.load(fp).get("active")
+            if name in BUILTIN:
+                keep.add(name)
+        except (OSError, ValueError, AttributeError):
+            pass
+        _save_installed(keep)
+
+    def on_loaded(self):
+        try:
+            self._migrate_library()
+        except OSError as e:
+            logging.warning("[theme_manager] library: %s", e)
+        try:
+            with open(ACTIVE_FILE) as fp:
+                name = json.load(fp).get("active", "")
             self._mtime = os.path.getmtime(ACTIVE_FILE)
             themes = self._all()
             if name in themes:
@@ -4826,7 +5580,12 @@ class ThemeManager(plugins.Plugin):
         import io
         ctx = self._ctx
         if ctx is not None:
-            frame, layers = ctx["canvas"], ctx["layers"]
+            laid = self.render_structure(theme)
+            if laid is not None:
+                frame, layers = laid[0], laid[1]
+                ctx = {"canvas": frame, "layers": layers, "face": laid[2]}
+            else:
+                frame, layers = ctx["canvas"], ctx["layers"]
         else:
             layers = None
             try:
@@ -4842,7 +5601,7 @@ class ThemeManager(plugins.Plugin):
             t = time.time()
         if mood:
             theme = resolve(theme, mood)
-        colorize(frame, theme, t, layers, self._face_frame(theme, t, mood) if ctx is not None else None).save(buf, "PNG")
+        colorize(frame, theme, t, layers, self._face_frame(theme, t, mood, ctx) if ctx is not None else None).save(buf, "PNG")
         return buf.getvalue()
 
     def on_webhook(self, path, request):
@@ -4851,7 +5610,13 @@ class ThemeManager(plugins.Plugin):
         png = lambda b: Response(b, mimetype="image/png", headers={"Cache-Control": "no-store"})
 
         if path == "api/themes":
-            return jsonify({"active": self._active, "themes": self._all()})
+            return jsonify({"active": self._active, "themes": self._all(), "stock": _clean(BUILTIN["default"])})
+
+        if path == "api/doctor":
+            return jsonify(self.doctor(force=request.args.get("now") == "1"))
+
+        if path == "api/library":
+            return jsonify({"themes": self.library_rows()})
 
         if path == "api/achievements":
             return jsonify({"enabled": self._settings["achievements"], "achievements": self.award_rows()})
@@ -4952,8 +5717,8 @@ class ThemeManager(plugins.Plugin):
                     data = _body(request)
                     mood = data.get("mood") if data.get("mood") in MOODS else None
                     return png(self._preview_png(_clean(data.get("theme", {})), data.get("t"), mood))
-                themes = self._all()
-                name = request.args.get("theme", self._active)
+                themes = dict(BUILTIN, **self._all())     # the gallery previews themes before they are installed
+                name = request.args.get("theme", self._active or "default")
                 if name not in themes:
                     return jsonify({"error": "unknown theme"}), 404
                 return png(self._preview_png(_clean(themes[name])))
@@ -5061,14 +5826,22 @@ class ThemeManager(plugins.Plugin):
                     write_json(os.path.join(THEME_DIR, name + ".json"), theme, indent=2)
                     if name == self._active:
                         self._apply(name)
+                    if data.get("fetch_pack") and theme.get("face_pack"):
+                        self.ensure_face_pack(theme["face_pack"])     # an online theme brings its faces with it
                     return jsonify({"ok": True})
+                if path == "api/install":
+                    ok_ = self.install_theme(str(data.get("name", "")))
+                    return jsonify({"ok": ok_, "error": None if ok_ else "unknown theme"})
+                if path == "api/uninstall":
+                    ok_ = self.uninstall_theme(str(data.get("name", "")))
+                    return jsonify({"ok": ok_, "error": None if ok_ else "that theme is not installed"})
                 if path == "api/delete":
                     name = str(data.get("name", ""))
                     if name in BUILTIN or not NAME_RE.fullmatch(name):
                         return jsonify({"ok": False, "error": "cannot delete"}), 400
                     os.remove(os.path.join(THEME_DIR, name + ".json"))
                     if self._active == name:
-                        self._apply("default", persist=True)
+                        self._deactivate(persist=True)
                     return jsonify({"ok": True})
             except (ValueError, TypeError, KeyError, FileNotFoundError, OverflowError) as e:
                 return jsonify({"ok": False, "error": str(e)}), 400
@@ -5141,7 +5914,7 @@ h2{font-size:12px;color:var(--dim);text-transform:uppercase;letter-spacing:1px;m
 <div class="bar">
 <input type="text" id="name" maxlength="32" placeholder="theme name">
 <button id="apply">Apply to screen</button><button id="try" title="show it on the screen for 30 seconds, then go back">Try 30 s</button><button id="save">Save</button>
-<button id="export">Export</button><button id="import">Import</button><button id="del" class="d">Delete</button>
+<button id="export">Export</button><button id="share" title="Open GitHub with this theme filled in, ready to submit to the online catalog">Share</button><button id="import">Import</button><button id="del" class="d">Delete</button>
 <input type="file" id="file" accept=".json,application/json" hidden></div>
 <div class="bar" id="backup"><span style="color:var(--dim)">Backup</span>
 <a id="dl" download="theme-manager-backup.zip"><button type="button">Download all my themes and faces</button></a>
@@ -5170,7 +5943,7 @@ const KINDS=SCENE_KINDS_JS;
 const ANIM=['pulse','rainbow','glitch','rain','stars','noise'];
 const MOODS=['look_r','sleep','awake','bored','intense','cool','happy','grateful','excited','motivated','demotivated','smart','lonely','sad','angry','friend','broken','debug','upload','handshake'];
 const HOLDERS=['{name}','{time}','{date}','{cpu}','{temp}','{mem}','{uptime}','{ip}','{mode}','{gps}','{lat}','{lon}','{sats}','{handshakes}','{cracked}','{session}','{power}','{battery}'];
-const TABS=['Colors','Effects','Text','Elements','Moods','Faces','JSON','Layout','Awards','Cracking','Radar','Map','Nodes','Settings'];
+const TABS=['Gallery','Colors','Effects','Text','Elements','Structure','Moods','Faces','JSON','Layout','Awards','Cracking','Radar','Map','Nodes','Doctor','Settings'];
 let S={active:'',themes:{}},sel='',cur={},info={elements:[],entities:[],packs:{}},tab='Colors',mood='sad',pvMood=null,busy=false,dirty=false,pvErr=false,timer=null,liveTimer=null;
 // Tabs that change on their own (a network appearing, a handshake landing) get polled every few seconds while
 // open, so they stay current without a manual tab round-trip. Server push (SSE/WebSocket) is not safe here --
@@ -5194,7 +5967,7 @@ const clamp=(v,a,b)=>Math.max(a,Math.min(b,v));
 /* ---- theme object helpers ---- */
 function normalize(o){const fx=l=>(l||[]).map(e=>typeof e==='string'?{type:e}:e);
  if(o.effects)o.effects=fx(o.effects);for(const m of Object.values(o.mood||{}))if(m.effects)m.effects=fx(m.effects);return o}
-function prune(o){for(const k of['effects','text','elements','mood','gradient','faces']){const v=o[k];if(v===undefined)continue;
+function prune(o){for(const k of['effects','text','elements','mood','gradient','faces','layout','hide','sizes','panels']){const v=o[k];if(v===undefined)continue;
   if(v===null||v===false||(Array.isArray(v)?!v.length:!Object.keys(v).length))delete o[k]}
  if(!o.face_pack){delete o.face_scale;delete o.face_offset;delete o.face_tint}else if(!o.face_tint)delete o.face_tint;
  for(const[m,v]of Object.entries(o.mood||{})){for(const k of['elements','effects'])if(v[k]&&!Object.keys(v[k]).length)delete v[k];
@@ -5560,9 +6333,9 @@ function panelSettings(){const p=E('div'),s=cfg.settings,d=cfg.display;
   idleOn?[field('after (minutes)',num(d.idle.minutes,v=>d.idle.minutes=v,1,240)),slider('dim to',[5,100,5],Math.round(d.idle.dim*100),v=>{d.idle.dim=v/100})]:null));
  p.append(E('div',{class:'row'},E('button',{id:'setsave',onclick:saveSettings},'Save settings')));
  return p}
-const PANELS={Colors:panelColors,Effects:panelEffects,Text:panelText,Elements:panelElements,Moods:panelMoods,Faces:panelFaces,JSON:panelJson,Layout:panelLayout,Awards:panelAwards,Cracking:panelCracking,Radar:panelRadar,Map:panelMap,Nodes:panelNodes,Settings:panelSettings};
+const PANELS={Gallery:panelGallery,Colors:panelColors,Effects:panelEffects,Text:panelText,Elements:panelElements,Structure:panelStructure,Moods:panelMoods,Faces:panelFaces,JSON:panelJson,Layout:panelLayout,Awards:panelAwards,Cracking:panelCracking,Radar:panelRadar,Map:panelMap,Nodes:panelNodes,Doctor:panelDoctor,Settings:panelSettings};
 function panel(){const p=$('panel');p.innerHTML='';p.append(PANELS[tab]());
- const t=$('tabs');t.innerHTML='';for(const n of TABS)t.append(E('button',{class:n===tab?'on':'',onclick:async()=>{tab=n;pickKey=null;$('pick').innerHTML='';$('pick').className='';pvMood=n==='Moods'?mood:null;if(n==='Elements'||n==='Moods'){try{info.entities=await(await fetch(base+'/api/entities')).json()}catch(e){}}if(n==='Layout')await loadLayout();if(n==='Awards')await loadAwards();if(n==='Cracking')await loadCracking();if(n==='Radar')await loadRadar();if(n==='Map')await loadLocations();if(n==='Nodes'){await loadNodes();await loadWardrive();await loadSettings()}if(n==='Settings')await loadSettings();liveRefresh(n);panel();overlay();schedule()}},n))}
+ const t=$('tabs');t.innerHTML='';for(const n of TABS)t.append(E('button',{class:n===tab?'on':'',onclick:async()=>{tab=n;pickKey=null;$('pick').innerHTML='';$('pick').className='';pvMood=n==='Moods'?mood:null;if(n==='Elements'||n==='Moods'){try{info.entities=await(await fetch(base+'/api/entities')).json()}catch(e){}}if(n==='Gallery')await loadLibrary();if(n==='Doctor')await loadDoctor();if(n==='Layout')await loadLayout();if(n==='Awards')await loadAwards();if(n==='Cracking')await loadCracking();if(n==='Radar')await loadRadar();if(n==='Map')await loadLocations();if(n==='Nodes'){await loadNodes();await loadWardrive();await loadSettings()}if(n==='Settings')await loadSettings();liveRefresh(n);panel();overlay();schedule()}},n))}
 
 /* ---- drag text lines on the preview ---- */
 const est=t=>(t||'').replace(/\{time\}/g,'00:00:00').replace(/\{date\}/g,'0000-00-00').replace(/\{\w+\}/g,'0000').length;
@@ -5586,13 +6359,102 @@ function drag(e,i,d){e.preventDefault();d.setPointerCapture(e.pointerId);
  const up=()=>{d.removeEventListener('pointermove',mv);d.removeEventListener('pointerup',up)};
  d.addEventListener('pointermove',mv);d.addEventListener('pointerup',up)}
 
+/* ---- doctor: what looks wrong on this unit ---- */
+let doctor=null;
+async function loadDoctor(now){try{doctor=await(await fetch(base+'/api/doctor'+(now?'?now=1':''))).json()}catch(e){}}
+function panelDoctor(){const p=E('div');
+ p.append(E('p',{style:'color:var(--dim);margin:0 0 10px'},'Checks the log, the kernel messages, the service and the disk for the things that have actually gone wrong on these units: crash loops, a stuck WiFi driver, pwngrid or bt-tether failing, a plugin logging errors, a full disk. It only reads; it never changes anything.'));
+ p.append(E('div',{class:'row'},E('button',{onclick:async()=>{await loadDoctor(true);panel()}},'Check now')));
+ if(!doctor){p.append(E('p',{style:'color:var(--dim)'},'Checking…'));return p}
+ if(!doctor.items.length)p.append(E('p',{style:'margin-top:10px'},'✓ All good: nothing wrong in the last hour.'));
+ for(const it of doctor.items)p.append(E('div',{class:'erow'+(it.level==='bad'?' set':''),style:'flex-wrap:wrap'},
+  E('span',{class:'ename',style:'width:100%'},(it.level==='bad'?'✗ ':'! ')+it.title),E('span',{class:'inh',style:'flex:1'},it.detail+' — '+it.hint)));
+ return p}
+/* ---- structure: what the screen is made of, not just how it is colored ---- */
+const PALETTE=[['accent','accent color'],['fg','ink color'],['bg','paper color']];
+function panelStructure(){const p=E('div');
+ p.append(E('p',{style:'color:var(--dim);margin:0 0 8px'},'Change how the screen is laid out, not only its colors: hide parts of it, make text bigger or smaller, move things, and draw boxes and lines behind them. Moves are added to pwnagotchi\u2019s own layout and to anything you moved on the Layout tab. Unknown names (a plugin you do not have) are simply ignored.'));
+ p.append(E('h2',{},'Elements'));
+ const setMap=(k,key,v)=>{cur[k]=cur[k]||{};if(v===undefined)delete cur[k][key];else cur[k][key]=v;touch()};
+ const setMove=(k,i,v)=>{const m=(cur.layout&&cur.layout[k])||[0,0];m[i]=v;setMap('layout',k,m[0]||m[1]?m:undefined)};
+ for(const k of info.elements){const hidden=(cur.hide||[]).includes(k),mv=(cur.layout||{})[k]||[0,0],sz=(cur.sizes||{})[k]||1;
+  p.append(E('div',{class:'erow'+(hidden?'':' set')},E('span',{class:'ename',style:'width:130px'},k),
+   check('show',!hidden,on=>{cur.hide=(cur.hide||[]).filter(x=>x!==k);if(!on)cur.hide.push(k);touch();panel()}),
+   hidden?null:[slider('size',[0.4,3,0.1],sz,v=>setMap('sizes',k,Math.abs(v-1)<0.01?undefined:v)),
+    field('move x',numIn(mv[0],v=>setMove(k,0,v),-200,200)),field('y',numIn(mv[1],v=>setMove(k,1,v),-200,200))]))}
+ p.append(E('h2',{},'Panels'),E('p',{style:'color:var(--dim);margin:0 0 8px'},'Boxes and lines drawn behind everything else, in the theme\u2019s own colors so they follow it (and its moods). For exact colors, use the JSON tab.'));
+ const list=cur.panels=cur.panels||[];
+ list.forEach((q,i)=>{const num=(l,k,mn,mx)=>field(l,numIn(q[k]||0,v=>{q[k]=v;touch()},mn,mx));
+  const pal=(l,k)=>field(l,select([['','none'],...PALETTE],PALETTE.some(c=>c[0]===q[k])?q[k]:(q[k]?'':'') ,v=>{if(v)q[k]=v;else delete q[k];touch();panel()}));
+  p.append(E('div',{class:'erow set',style:'flex-wrap:wrap'},E('span',{class:'ename',style:'width:60px'},q.type),
+   ...(q.type==='line'?[num('x','x',-480,960),num('y','y',-320,640),num('to x','x2',-480,960),num('to y','y2',-320,640),pal('color','color')]
+    :[num('x','x',-480,960),num('y','y',-320,640),num('w','w',1,960),num('h','h',1,640),num('round','radius',0,40),pal('fill','fill'),pal('outline','outline')]),
+   E('button',{class:'d',onclick:()=>{list.splice(i,1);touch();panel()}},'remove')))});
+ p.append(E('div',{class:'row'},
+  E('button',{onclick:()=>{list.push({type:'rect',x:10,y:30,w:200,h:100,outline:'accent',width:1,radius:0});touch();panel()}},'Add a box'),
+  E('button',{onclick:()=>{list.push({type:'line',x:0,y:160,x2:480,y2:160,color:'accent',width:1});touch();panel()}},'Add a line')));
+ return p}
+/* ---- gallery: the bundled themes, installed before they can be used ---- */
+const REPO='https://github.com/Korrie71/pwnagotchi-theme-manager/';
+const RAW='https://raw.githubusercontent.com/Korrie71/pwnagotchi-theme-manager/main/';
+const API='https://api.github.com/repos/Korrie71/pwnagotchi-theme-manager/contents/themes';
+let online=null;
+/* the online list is whatever is in the project's themes/ folder, so sharing a theme is one file, no index to edit */
+async function loadOnline(){online='loading';panel();
+ try{const r=await fetch(API);if(!r.ok)throw 0;
+  const files=(await r.json()).filter(f=>/^[A-Za-z0-9_\- ]{1,32}\.json$/.test(f.name||''));
+  online=await Promise.all(files.slice(0,40).map(async f=>{let description='';
+   try{description=(await(await fetch(RAW+'themes/'+encodeURIComponent(f.name))).json()).description||''}catch(e){}
+   return{name:f.name.slice(0,-5),description}}))}
+ catch(e){online=[]}panel()}
+async function installOnline(t){
+ try{const r=await fetch(RAW+'themes/'+encodeURIComponent(t.name+'.json'));if(!r.ok)throw 0;const theme=await r.json();
+  const j=await(await post('save',{name:t.name,theme,fetch_pack:true})).json();
+  if(!j.ok)return say(j.error||'could not install that theme');
+  say('installed '+t.name+(theme.face_pack&&!info.packs[theme.face_pack]?' (downloading its face pack: it will appear on the Faces tab)':''));await refresh(true);panel()}
+ catch(e){say('could not download that theme')}}
+let library={themes:[]},galF={q:'',k:'all'};
+async function loadLibrary(){try{library=await(await fetch(base+'/api/library')).json()}catch(e){}}
+function panelGallery(){const p=E('div');
+ p.append(E('p',{style:'color:var(--dim);margin:0 0 10px'},'Themes are installed before they can be used. Install the ones you want and they appear in the list above and in the touch menu; uninstall any time. Your own saved themes are always installed.'));
+ if(!library.themes.length){p.append(E('p',{style:'color:var(--dim)'},'Loading the gallery…'));return p}
+ const q=E('input',{type:'search',placeholder:'search themes',id:'galq',style:'width:170px;margin-right:8px'}),
+  kind=E('select',{id:'galk'},[['all','all'],['animated','animated'],['scenery','with scenery'],['dark','dark'],['light','light'],['installed','installed'],['not installed','not installed']].map(([v,l])=>E('option',{value:v},l)));
+ const count=E('span',{style:'color:var(--dim);margin-left:8px'});
+ const g=E('div',{style:'display:grid;grid-template-columns:repeat(auto-fill,minmax(150px,1fr));gap:10px'});
+ const applyFilter=()=>{let n=0;for(const c of g.children){const t=c.dataset.tags.split(' '),k=kind.value;
+   const show=c.dataset.name.toLowerCase().includes(q.value.trim().toLowerCase())&&(k==='all'||t.includes(k==='not installed'?'notinstalled':k));
+   c.style.display=show?'':'none';if(show)n++}
+  count.textContent=n+' of '+library.themes.length;galF={q:q.value,k:kind.value}};
+ q.value=galF.q;kind.value=galF.k;q.oninput=applyFilter;kind.onchange=applyFilter;
+ p.append(E('div',{class:'row'},q,kind,count));
+ for(const t of library.themes){
+  const img=E('img',{src:base+'/api/preview?theme='+encodeURIComponent(t.name),loading:'lazy',alt:t.name,style:'width:100%;border-radius:6px;background:'+t.bg+';display:block;aspect-ratio:3/2'});
+  const btn=E('button',{onclick:async()=>{btn.disabled=true;
+   try{const r=await(await post(t.installed?'uninstall':'install',{name:t.name})).json();
+    if(!r.ok)say(r.error||'could not do that');
+    else{say((t.installed?'uninstalled ':'installed ')+t.name);await loadLibrary();await refresh(true)}}
+   catch(e){say('could not do that')}finally{panel()}}},t.installed?'Uninstall':'Install');
+  g.append(E('div',{'data-name':t.name,'data-tags':[t.animated?'animated':'',t.scene?'scenery':'',t.dark?'dark':'light',t.installed?'installed':'notinstalled'].join(' '),style:'border:1px solid var(--line);border-radius:8px;padding:6px;background:var(--panel)'},img,
+   E('div',{style:'display:flex;justify-content:space-between;align-items:center;margin-top:6px;gap:6px'},
+    E('span',{},t.name+(t.animated?' ✦':'')+(t.pack?' +faces':'')),btn)))}
+ p.append(g);applyFilter();
+ p.append(E('h2',{},'Online'),E('p',{style:'color:var(--dim);margin:0 0 8px'},'More themes from the project\u2019s themes folder on GitHub (everything anyone has shared). Your browser fetches them (nothing goes through the Pi), and each one is checked before it is saved as one of your own themes. Made one you like? Use Share above the preview.'));
+ p.append(E('div',{class:'row'},E('button',{onclick:loadOnline},online===null?'Check for more themes':'Check again')));
+ if(online==='loading')p.append(E('p',{style:'color:var(--dim)'},'Looking…'));
+ else if(online&&!online.length)p.append(E('p',{style:'color:var(--dim)'},'Nothing found (no internet in this browser, or the catalog is empty).'));
+ else for(const t of online||[]){const have=!!S.themes[t.name];
+  p.append(E('div',{class:'erow'+(have?' set':'')},E('span',{class:'ename',style:'width:150px'},t.name),E('span',{class:'inh',style:'flex:1'},t.description||''),
+   E('button',{onclick:()=>installOnline(t)},have?'Reinstall':'Install')))}
+ return p}
 /* ---- theme list + buttons ---- */
 function render(){const g=$('grid');g.innerHTML='';
+ if(!Object.keys(S.themes).length)g.append(E('p',{style:'color:var(--dim);margin:6px 0'},'No themes installed yet. Open the Gallery tab to install one, or design your own below and Save it.'));
  for(const[n,t]of Object.entries(S.themes)){const c=E('div',{class:'card'+(n===sel?' sel':'')+(n===S.active?' act':''),'data-name':n,onclick:()=>{sel=n;pick()}},
   E('div',{class:'sw'},[t.bg,t.fg,t.accent,t.web].map(x=>{const i=E('i');i.style.background=x;return i})),n);
   const f=(t.effects||[]).length+(t.text||[]).length+Object.keys(t.elements||{}).length+(t.face_pack?1:0)+Object.keys(t.mood||{}).length;
   if(f)c.append(E('small',{},' +'+f));g.append(c)}}
-function pick(){cur=normalize(clone(S.themes[sel]));delete cur.builtin;$('name').value=sel;pvMood=tab==='Moods'?mood:null;render();panel();overlay();schedule()}
+function pick(){cur=normalize(clone(S.themes[sel]||S.stock||{}));delete cur.builtin;$('name').value=S.themes[sel]?sel:'';pvMood=tab==='Moods'?mood:null;render();panel();overlay();schedule()}
 async function refresh(keep){S=await(await fetch(base+'/api/themes')).json();if(!S.themes[sel])sel=S.active;
  if(keep){render()}else pick();
  try{const[el,en,pk]=await Promise.all([fetch(base+'/api/elements'),fetch(base+'/api/entities'),fetch(base+'/api/packs')]);
@@ -5614,8 +6476,12 @@ $('apply').onclick=async()=>{clearInterval(tryTimer);$('try').textContent='Try 3
  if(ex&&ex.builtin){if(!same(cur,ex))return say('built-in themes can\'t be changed: type a new name, Save, then Apply');}
  else{if(!nameOk(n))return say('give the theme a name first');if(!(ex&&same(cur,ex))&&!await saveAs(n))return}
  const r=await(await post('apply',{name:n})).json();say(r.ok?'applied '+n+' to the screen':r.error);sel=n;await refresh()};
-$('del').onclick=async()=>{const r=await(await post('delete',{name:sel})).json();say(r.ok?'deleted '+sel:r.error);if(r.ok){sel='';await refresh()}};
+$('del').onclick=async()=>{if(!S.themes[sel])return say('nothing selected');const b=S.themes[sel].builtin;const r=await(await post(b?'uninstall':'delete',{name:sel})).json();say(r.ok?(b?'uninstalled ':'deleted ')+sel:r.error);if(r.ok){sel='';await refresh()}};
 $('export').onclick=()=>{const n=($('name').value.trim()||'theme');const a=E('a',{href:URL.createObjectURL(new Blob([JSON.stringify(prune(clone(cur)),null,2)],{type:'application/json'})),download:n+'.json'});document.body.append(a);a.click();a.remove()};
+$('share').onclick=()=>{const n=$('name').value.trim();if(!nameOk(n))return say('give the theme a name first');
+ const url=REPO+'new/main/themes?filename='+encodeURIComponent(n+'.json')+'&value='+encodeURIComponent(JSON.stringify(prune(clone(cur)),null,2)+'\n');
+ if(url.length>7500)return say('this theme is too long to share with a link: use Export, then add the file to a pull request');
+ window.open(url,'_blank','noopener');say('opened GitHub with your theme filled in: commit it as a pull request to share it')};
 $('import').onclick=()=>$('file').click();
 $('file').onchange=async e=>{const f=e.target.files[0];if(!f)return;
  try{cur=normalize(JSON.parse(await f.text()));$('name').value=f.name.replace(/\.json$/i,'').replace(/[^A-Za-z0-9_\- ]/g,'_').slice(0,32);
@@ -5628,7 +6494,7 @@ $('bfile').onchange=async e=>{const f=e.target.files[0];if(!f)return;const fd=ne
   else{say('restored '+j.added.length+', skipped '+j.skipped.length+(j.invalid.length?', could not use '+j.invalid.length+' ('+j.invalid[0]+')':''));await refresh()}}
  catch(err){say('could not restore that file')}e.target.value=''};
 window.addEventListener('resize',overlay);
-refresh();
+refresh().then(async()=>{if(!Object.keys(S.themes).length||location.hash==='#gallery'){tab='Gallery';await loadLibrary();panel()}});
 </script>{% endraw %}</body></html>
 """
 
@@ -5640,12 +6506,29 @@ if __name__ == "__main__":
     tm = ThemeManager.__new__(ThemeManager)
     cmd = a[0] if a else ""
     if cmd == "list":
-        cur = json.load(open(ACTIVE_FILE))["active"] if os.path.exists(ACTIVE_FILE) else "default"
-        for n, t in tm._all().items():
+        cur = json.load(open(ACTIVE_FILE))["active"] if os.path.exists(ACTIVE_FILE) else ""
+        themes = tm._all()
+        for n, t in themes.items():
             print("%s %-16s %s" % ("*" if n == cur else " ", n, "animated" if is_animated(t) else ""))
+        if not themes:
+            print("no themes installed -- see 'library' and 'install <name>'")
+    elif cmd == "library":
+        have = _load_installed()
+        for n, t in BUILTIN.items():
+            print("%s %-16s %s" % ("installed" if n in have else "         ", n, "animated" if is_animated(_clean(t)) else ""))
+    elif cmd == "install" and len(a) == 2:
+        if a[1] not in BUILTIN:
+            sys.exit("not in the library (see 'library')")
+        _save_installed(_load_installed() | {a[1]})
+        print("installed", a[1])
+    elif cmd == "uninstall" and len(a) == 2:
+        if a[1] not in _load_installed():
+            sys.exit("not installed")
+        _save_installed(_load_installed() - {a[1]})
+        print("uninstalled", a[1])
     elif cmd == "set" and len(a) == 2:
         if a[1] not in tm._all():
-            sys.exit("unknown theme")
+            sys.exit("not installed (see 'library' and 'install <name>')")
         os.makedirs(THEME_DIR, exist_ok=True)
         write_json(ACTIVE_FILE, {"active": a[1]})
         print("active ->", a[1], "(applies within seconds)")

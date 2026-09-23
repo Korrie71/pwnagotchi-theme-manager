@@ -108,7 +108,14 @@ nodes_info = {
     "f:02:00:00:00:00:13": {"kind": "found", "mac": "02:00:00:00:00:13", "name": "zero-w-new", "ip": "192.0.2.12:8080", "handshakes": 7},
 }
 menu.update(nodes=list(nodes_info), nodes_info=nodes_info, nodes_scanning=False, wardrive=wardrive_stats)
-for name, extra in (("menu-themes.png", {"tab": "themes", "page": 1}), ("menu-plugins.png", {"tab": "plugins", "busy": {"bt-tether"}}),
+store_rows = [{"name": n, "installed": n in ("matrix", "cyberpunk", "ice"), **{k: T._clean(v)[k] for k in ("bg", "fg", "accent")}} for n, v in T.BUILTIN.items()]
+menu.update(filter="all", shown=len(store_rows), doctor={"status": "warn", "checked_at": 0, "items": [
+    {"level": "bad", "title": "the WiFi driver is timing out", "detail": "12 driver errors in the last hour", "hint": "The WiFi chip is stuck; only a reboot fixes it"},
+    {"level": "warn", "title": "bt-tether cannot connect", "detail": "9 failed attempts in the last hour", "hint": "Check that tethering is switched on on the phone"}]},
+    qr_url="http://192.0.2.42:8080/plugins/theme_manager/#gallery")
+menu.update(library=["__filter__"] + [r["name"] for r in store_rows], installed={r["name"] for r in store_rows if r["installed"]}, lib_colors={r["name"]: r for r in store_rows})
+for name, extra in (("menu-themes.png", {"tab": "themes", "page": 1}), ("menu-store.png", {"tab": "themes", "store": True}), ("menu-qr.png", {"tab": "themes", "store": True, "mode": "qr"}),
+                    ("menu-doctor.png", {"tab": "system", "mode": "doctor"}), ("menu-plugins.png", {"tab": "plugins", "busy": {"bt-tether"}}),
                     ("menu-system.png", {"tab": "system", "overheat": True, "atkmode": "home"}), ("menu-awards.png", {"tab": "awards"}),
                     ("menu-layout.png", {"tab": "layout", "page": 1}), ("menu-crack.png", {"tab": "crack"}),
                     ("menu-radar.png", {"tab": "radar"}), ("menu-nodes.png", {"tab": "nodes"}),
