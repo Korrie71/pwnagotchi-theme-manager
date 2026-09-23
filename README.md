@@ -81,8 +81,7 @@ And more, each with its own scenery: a Star Trek console, the seasons, landscape
 </p>
 <p>
 <img src="docs/images/menu-radar.png" width="32%" alt="Radar tab, a sonar-style sweep of nearby networks">
-<img src="docs/images/menu-nodes.png" width="32%" alt="Nodes tab, other units on the network">
-<img src="docs/images/menu-wardrive.png" width="32%" alt="Wardrive tab, a trip in progress">
+<img src="docs/images/menu-nodes.png" width="32%" alt="Nodes tab, other units on the network, with a wardrive trip in progress">
 </p>
 
 **Web editor** with a live preview: drag text lines on the preview, or click a part of the screen to recolor it.
@@ -182,7 +181,7 @@ you have forwarded to it) for one that is neither in mesh range nor on this netw
 
 **Web editor:** open `http://<pi-address>:8080/plugins/theme_manager/`. Pick a theme, change colors and effects, drag text
 lines on the preview, click a part of the screen to recolor it, then **Apply to screen**. Themes you save appear in the list.
-The **Layout**, **Awards**, **Cracking**, **Radar**, **Map**, **Nodes**, **Wardrive** and **Settings** tabs
+The **Layout**, **Awards**, **Cracking**, **Radar**, **Map**, **Nodes** (which also has the Wardrive trip log) and **Settings** tabs
 (overheating auto-off, achievements, brightness and night mode) are about the device rather than the theme.
 
 **Command line** (use pwnagotchi's Python):
@@ -213,7 +212,7 @@ $P mode                  # show the attack mode (or: mode passive / mode home)
 | **Layout** | every element on the screen; tap one to move it with `X -` `X +` `Y -` `Y +` (1, 5 or 10 pixels per tap), `reset` and `done`; `clear` puts everything back |
 | **Crack** | every captured handshake with a status pill (`PWND`/`WAIT`/`NEW`/`BAD`/`?`); tap one for the password, quality guess, or location if it has one |
 | **Radar** | a rotating sonar sweep of nearby networks; tap a blip for its name, encryption, client count, signal, and whether you already have its handshake. Display-only — it never affects what pwnagotchi attacks |
-| **Nodes** | other units running `node_pwn`; one in WiFi range shows up here on its own, over pwnagotchi's own mesh (no shared network needed). `scan` also checks the local network. Tap a found one to pair, tap a paired one and tap again to unpair. Shows name, address (or signal, for a mesh find), handshake count and online/offline. A node that is neither in mesh range nor on this network can be added by address instead, from the web editor's Nodes tab (no keyboard here to type one with). The web editor's Settings tab has an off-by-default switch to actually skip a network a paired, online node already captured, not just show it covered on the Radar. Right next to it, the **Wardrive** tab is a one-button (`START WARDRIVE` / `STOP`) trip log for going out together: distance, duration, unique networks seen and handshakes captured since the trip started, with the full gps breadcrumb trail and route map in the web editor's own Wardrive tab; display-only, it never affects what pwnagotchi attacks |
+| **Nodes** | a **Wardrive** row at the top — tap it to start/stop a trip log, showing distance, duration, unique networks seen and handshakes captured since it started (the full gps breadcrumb trail and route map are in the web editor's Nodes tab); display-only, it never affects what pwnagotchi attacks. Below it, other units running `node_pwn`: one in WiFi range shows up here on its own, over pwnagotchi's own mesh (no shared network needed). `scan` also checks the local network. Tap a found one to pair, tap a paired one and tap again to unpair. Shows name, address (or signal, for a mesh find), handshake count and online/offline. A node that is neither in mesh range nor on this network can be added by address instead, from the web editor's Nodes tab (no keyboard here to type one with). The web editor's Settings tab has an off-by-default switch to actually skip a network a paired, online node already captured, not just show it covered on the Radar |
 
 Swipe sideways on the bare screen to change theme. `close`, a tap outside the menu, or 20 seconds of nothing closes it. It costs nothing while idle: one thread sleeps until
 the screen is touched.

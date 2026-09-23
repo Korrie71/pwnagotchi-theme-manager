@@ -87,7 +87,7 @@ finger = Panel(tm2)
 finger.calibrate()
 tm2.on_wifi_update(None, [ap("02:00:00:00:00:01", "CoffeeShop", 6, -45, 1, "WPA2"),
                            ap("02:00:00:00:00:02", "GuestWifi", 11, -70, 0, "WPA2")])
-ok("all tabs fit and do not overlap", len(T.TAB_NAMES) == 9)
+ok("all tabs fit and do not overlap", len(T.TAB_NAMES) == 8)
 tm2.open_menu("list", "radar")
 ok("opening straight to the tab loads the current scan", len(tm2._menu["radar"]) == 2)
 hits = [h for h in T.menu_hits(tm2._menu) if h[1][0] == "radarblip"]

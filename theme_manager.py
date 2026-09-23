@@ -2291,7 +2291,7 @@ CONFIRM_S = 4.0          # a power button must be tapped twice within this time
 GPS_TOKENS = ("gps", "lat", "lon", "sats")
 STATUS_LINES = ("CPU {temp}  load {cpu}  RAM {mem}", "IP {ip}", "GPS {gps}  {lat} {lon}",
                 "Up {uptime}  Power {power}  Bat {battery}", "Pwned {handshakes}  Cracked {cracked}  Session {session}")
-TAB_NAMES = ("themes", "plugins", "system", "awards", "layout", "crack", "radar", "nodes", "wardrive")
+TAB_NAMES = ("themes", "plugins", "system", "awards", "layout", "crack", "radar", "nodes")
 TAB_WINDOW = 5      # tabs shown at once before it needs '<'/'>' to see the rest: as many as fit comfortably
 TAB_ARROW_W = 36
 PROTECTED_PLUGINS = ('theme_manager',)   # never listed: switching it off would remove the menu itself
@@ -2427,8 +2427,6 @@ def menu_hits(menu):
             x, y = radar_pos(r["angle"], radar_radius_frac(r["rssi"]))
             hits.append(((x - 15, y - 15, x + 15, y + 15), ("radarblip", r["mac"])))
         return hits + common
-    if tab == "wardrive":
-        return [((90, 220, 390, 264), ("wdtoggle", None))] + common
     act = {"themes": "pick", "awards": "award", "layout": "adjust", "crack": "crackrow", "nodes": "noderow"}.get(tab, "toggle")
     hits = [((28, 44 + i * 44, 452, 44 + i * 44 + 40), (act, n))
             for i, n in enumerate(menu_items(menu)[page * MENU_ROWS:(page + 1) * MENU_ROWS])]
@@ -2483,19 +2481,6 @@ def draw_radar(d, menu, bg, fg, acc, line):
     d.text((RADAR_CX, 50), text, font=_font(13, True), fill=fg, anchor="mm")
 
 
-def draw_wardrive(d, menu, fg, acc):
-    """Trip stats; the button itself is drawn generically in draw_menu's per-hit loop (act == "wdtoggle")."""
-    w = menu.get("wardrive") or {}
-    active = w.get("active", False)
-    lines = ["ACTIVE" if active else "stopped",
-             "Distance: %s" % _fmt_dist_m(w.get("distance_m", 0)),
-             "Duration: %s" % _fmt_dur_s(w.get("duration_s", 0)),
-             "Networks seen: %d" % w.get("aps_seen", 0),
-             "Handshakes: %d" % w.get("handshakes", 0)]
-    for i, text in enumerate(lines):
-        d.text((240, 46 + i * 26), text, font=_font(17, i == 0), fill=acc if i == 0 and active else fg, anchor="mm")
-
-
 def draw_menu(img, menu, theme):
     """Draw the menu (or the calibration prompt) onto an upright RGB frame."""
     d = ImageDraw.Draw(img)
@@ -2523,16 +2508,14 @@ def draw_menu(img, menu, theme):
         d.text((240, 178), "(Settings in the web editor, or settings.json)", font=_font(12), fill=_mixc(fg, bg, 0.4), anchor="mm")
     if tab == "layout" and not menu["layout"]:
         d.text((240, 150), "Nothing on the screen yet", font=_font(16, True), fill=fg, anchor="mm")
-    if tab == "nodes" and len(menu.get("nodes", [])) <= 1:
-        d.text((240, 150), "No nodes yet", font=_font(16, True), fill=fg, anchor="mm")
-        d.text((240, 178), "Install node_pwn on another unit, then tap scan", font=_font(12), fill=_mixc(fg, bg, 0.4), anchor="mm")
+    if tab == "nodes" and len(menu.get("nodes", [])) <= 2:
+        d.text((240, 194), "No nodes yet", font=_font(16, True), fill=fg, anchor="mm")
+        d.text((240, 222), "Install node_pwn on another unit, then tap scan", font=_font(12), fill=_mixc(fg, bg, 0.4), anchor="mm")
     if tab == "system":
         for i, text in enumerate(menu.get("lines", ())):
             d.text((32, 46 + i * 24), text, font=_font(16), fill=fg)
     if tab == "radar":
         draw_radar(d, menu, bg, fg, acc, line)
-    if tab == "wardrive":
-        draw_wardrive(d, menu, fg, acc)
     for rect, (act, arg) in menu_hits(menu):
         x0, y0, x1, y1 = rect
         if act in ("mode", "power"):
@@ -2621,6 +2604,16 @@ def draw_menu(img, menu, theme):
             info = menu["nodes_info"][arg]
             if info["kind"] == "summary":
                 d.text((x0 + 6, (y0 + y1) // 2), info["text"], font=_font(14, True), fill=fg, anchor="lm")
+            elif info["kind"] == "wardrive":
+                active, cy = info.get("active", False), (y0 + y1) // 2
+                d.rectangle(rect, fill=line, outline=acc if active else line, width=2)
+                text = ("wardrive: %s, %s" % (_fmt_dist_m(info.get("distance_m", 0)), _fmt_dur_s(info.get("duration_s", 0)))
+                        if active else "wardrive: stopped")
+                d.text((x0 + 12, cy), text, font=_font(15, active), fill=acc if active else fg, anchor="lm")
+                px0, px1 = x1 - 96, x1 - 10
+                d.rounded_rectangle((px0, y0 + 7, px1, y1 - 7), 10, fill=acc if active else panel, outline=acc, width=2)
+                d.text(((px0 + px1) // 2, cy), "STOP" if active else "START", font=_font(13, True),
+                       fill=bg if active else fg, anchor="mm")
             else:
                 paired, online = info["kind"] == "paired", info.get("online", True)
                 dim = paired and not online
@@ -2637,11 +2630,6 @@ def draw_menu(img, menu, theme):
             d.rectangle(rect, fill=acc if menu.get("nodes_scanning") else line, outline=acc, width=1)
             d.text(((x0 + x1) // 2, (y0 + y1) // 2), "scanning…" if menu.get("nodes_scanning") else "scan",
                    font=_font(14, True), fill=bg if menu.get("nodes_scanning") else fg, anchor="mm")
-        elif act == "wdtoggle":
-            active = (menu.get("wardrive") or {}).get("active", False)
-            d.rounded_rectangle(rect, 10, fill=acc if active else line, outline=acc, width=2)
-            d.text(((x0 + x1) // 2, (y0 + y1) // 2), "STOP" if active else "START WARDRIVE",
-                   font=_font(16, True), fill=bg if active else fg, anchor="mm")
         elif act == "toggle":
             busy, on, bad = arg in menu["busy"], arg in menu["on"], arg in menu.get("failed", ())
             d.rectangle(rect, fill=line, outline=acc if on else line, width=2)
@@ -2899,7 +2887,7 @@ def _pwa_icon(size, theme):
 
 class ThemeManager(plugins.Plugin):
     __author__ = "theme_manager contributors"
-    __version__ = "2.16.0"
+    __version__ = "2.16.1"
     __license__ = "GPL3"
     __description__ = "Theme engine for the 3.5 inch display: colors, effects, animations, custom text, web GUI."
 
@@ -3278,8 +3266,8 @@ class ThemeManager(plugins.Plugin):
                 self._sync_crack_menu(menu)
             elif menu.get("tab") == "radar" and menu["mode"] == "list":
                 self._sync_radar_menu(menu)
-            elif menu.get("tab") == "wardrive" and menu["mode"] == "list":
-                self._sync_wardrive_menu(menu)
+            elif menu.get("tab") == "nodes" and menu["mode"] == "list":
+                self._sync_nodes_menu(menu)
             menu["t"] = t
             draw_menu(img, menu, self._theme)
         toast = self._toast
@@ -3362,7 +3350,6 @@ class ThemeManager(plugins.Plugin):
         self._sync_crack_menu(self._menu)
         self._sync_radar_menu(self._menu)
         self._sync_nodes_menu(self._menu)
-        self._sync_wardrive_menu(self._menu)
         self._wake.set()
         self._refresh_now()
 
@@ -3370,14 +3357,14 @@ class ThemeManager(plugins.Plugin):
         rows, _ = self.radar_rows()
         menu["radar"] = rows
 
-    def _sync_wardrive_menu(self, menu):
-        menu["wardrive"] = self.wardrive_status()
-
     def _sync_nodes_menu(self, menu):
+        w = self.wardrive_status()
+        menu["wardrive"] = w
         paired, found = self.node_rows()
         online = sum(1 for p in paired if p.get("online", True))
-        info = {"__summary__": {"kind": "summary", "text": "%d paired (%d online) · %d found" % (len(paired), online, len(found))}}
-        order = ["__summary__"]
+        info = {"__summary__": {"kind": "summary", "text": "%d paired (%d online) · %d found" % (len(paired), online, len(found))},
+                "__wardrive__": dict(w, kind="wardrive")}
+        order = ["__summary__", "__wardrive__"]
         for p in paired:
             info["p:" + p["mac"]] = dict(p, kind="paired")
             order.append("p:" + p["mac"])
@@ -4084,6 +4071,15 @@ class ThemeManager(plugins.Plugin):
                     info = menu["nodes_info"].get(arg)
                     if not info or info["kind"] == "summary":
                         pass
+                    elif info["kind"] == "wardrive":
+                        if info.get("active", False):
+                            self.stop_wardrive()
+                            self.toast("wardrive stopped", seconds=3, now=now)
+                        else:
+                            self.start_wardrive()
+                            self.toast("wardrive started", seconds=3, now=now)
+                        self._sync_nodes_menu(menu)
+                        self._refresh_now()
                     elif info["kind"] == "found":
                         menu["confirm"] = None
                         if self.pair_node(info["mac"]):
@@ -4112,16 +4108,6 @@ class ThemeManager(plugins.Plugin):
                     if not menu.get("nodes_scanning"):
                         menu["nodes_scanning"] = True
                         threading.Thread(target=self._scan_nodes_bg, args=(menu,), daemon=True, name="theme-nodescan").start()
-                    return
-                elif act == "wdtoggle":
-                    if (menu.get("wardrive") or {}).get("active", False):
-                        self.stop_wardrive()
-                        self.toast("wardrive stopped", seconds=3, now=now)
-                    else:
-                        self.start_wardrive()
-                        self.toast("wardrive started", seconds=3, now=now)
-                    self._sync_wardrive_menu(menu)
-                    self._refresh_now()
                     return
                 elif act == "cal":
                     menu.update(mode="calib", step=0, raw=[])
@@ -4538,7 +4524,7 @@ class ThemeManager(plugins.Plugin):
             theme = self._current(start)
             busy = self._trans is not None or start < self._event_until + 0.3 or start < self._force[1] + 0.3
             m = self._menu
-            live_menu = m is not None and m.get("tab") in ("system", "radar", "wardrive") and m["mode"] == "list"
+            live_menu = m is not None and m.get("tab") in ("system", "radar", "nodes") and m["mode"] == "list"
             animate = busy or live_menu or self._face_multi or is_animated(theme)
             if self._heat is None and not live_menu:      # too hot: only redraw when the UI itself changes
                 animate = False
@@ -5058,7 +5044,7 @@ const KINDS=SCENE_KINDS_JS;
 const ANIM=['pulse','rainbow','glitch','rain','stars','noise'];
 const MOODS=['look_r','sleep','awake','bored','intense','cool','happy','grateful','excited','motivated','demotivated','smart','lonely','sad','angry','friend','broken','debug','upload','handshake'];
 const HOLDERS=['{name}','{time}','{date}','{cpu}','{temp}','{mem}','{uptime}','{ip}','{mode}','{gps}','{lat}','{lon}','{sats}','{handshakes}','{cracked}','{session}','{power}','{battery}'];
-const TABS=['Colors','Effects','Text','Elements','Moods','Faces','JSON','Layout','Awards','Cracking','Radar','Map','Nodes','Wardrive','Settings'];
+const TABS=['Colors','Effects','Text','Elements','Moods','Faces','JSON','Layout','Awards','Cracking','Radar','Map','Nodes','Settings'];
 let S={active:'',themes:{}},sel='',cur={},info={elements:[],entities:[],packs:{}},tab='Colors',mood='sad',pvMood=null,busy=false,dirty=false,pvErr=false,timer=null;
 const say=t=>$('msg').textContent=t||'';
 /* After the plugin restarts (or the browser loses its session) the page's token is stale: fetch a fresh one and retry once. */
@@ -5346,8 +5332,9 @@ let wardrive={active:false,started_at:null,ended_at:null,distance_m:0,duration_s
 async function loadWardrive(){try{wardrive=await(await fetch(base+'/api/wardrive')).json()}catch(e){}}
 const fmtDist=m=>m>=1000?(m/1000).toFixed(2)+' km':Math.round(m)+' m';
 const fmtDur=s=>{const h=Math.floor(s/3600),m=Math.floor((s%3600)/60),ss=Math.round(s%60);return(h?h+'h ':'')+(h||m?m+'m ':'')+ss+'s'};
-function panelWardrive(){const p=E('div'),w=wardrive;
- p.append(E('p',{style:'color:var(--dim);margin:0 0 10px'},'A start/stop trip log: a breadcrumb trail from the gps plugin, plus distance, unique networks seen and handshakes captured while it runs. Display and bookkeeping only — it never changes what gets attacked.'));
+function panelWardriveSection(p){const w=wardrive;
+ p.append(E('h2',{},'Wardrive'));
+ p.append(E('p',{style:'color:var(--dim);margin:0 0 10px'},'A start/stop trip log for going out with a paired node: a breadcrumb trail from the gps plugin, plus distance, unique networks seen and handshakes captured while it runs. Display and bookkeeping only — it never changes what gets attacked.'));
  const btn=E('button',{onclick:async()=>{btn.disabled=true;
   try{wardrive=await(await post(w.active?'wardrive/stop':'wardrive/start',{})).json()}catch(e){}
   finally{btn.disabled=false;panel()}}},w.active?'Stop wardrive':'Start wardrive');
@@ -5356,12 +5343,12 @@ function panelWardrive(){const p=E('div'),w=wardrive;
   [[fmtDist(w.distance_m),'Distance'],[fmtDur(w.duration_s),'Duration'],[String(w.aps_seen),'Seen'],[String(w.handshakes),'Handshakes']].map(([v,l])=>
    E('div',{class:'statcard',style:'text-align:center;cursor:default;background:var(--panel);border:1px solid var(--line);border-radius:8px;padding:8px'},
     E('div',{style:'font-size:20px'},v),E('small',{style:'color:var(--dim)'},l)))));
- if(!w.points.length){p.append(E('p',{style:'color:var(--dim)'},w.active?'Waiting for a gps fix…':'No track yet: start a wardrive to log one.'));return p}
+ if(!w.points.length){p.append(E('p',{style:'color:var(--dim)'},w.active?'Waiting for a gps fix…':'No track yet: start a wardrive to log one.'));return}
  const div=E('div',{id:'wdmap',style:'height:320px;border-radius:8px;border:1px solid var(--line);background:var(--panel)'});
  const status=E('p',{style:'color:var(--dim)'},'Loading map…');
  p.append(div,status);
  loadLeaflet().then(()=>{
-  if(tab!=='Wardrive')return;
+  if(tab!=='Nodes')return;
   status.remove();
   const map=L.map(div);
   L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png',{attribution:'&copy; OpenStreetMap contributors',maxZoom:19}).addTo(map);
@@ -5369,12 +5356,13 @@ function panelWardrive(){const p=E('div'),w=wardrive;
   L.circleMarker(w.points[w.points.length-1],{radius:6,color:'#2ecc71'}).addTo(map);
   map.fitBounds(line.getBounds(),{padding:[20,20],maxZoom:17})
  }).catch(()=>{status.textContent='Could not load the map (no internet in this browser?). The stats above still work.'});
- if(w.active)setTimeout(async()=>{if(tab!=='Wardrive')return;await loadWardrive();panel()},10000);
- return p}
+ if(w.active)setTimeout(async()=>{if(tab!=='Nodes')return;await loadWardrive();panel()},10000)}
 let nodes={paired:[],found:[]},nodesScanning=false;
 async function loadNodes(){try{nodes=await(await fetch(base+'/api/nodes')).json()}catch(e){}}
 const nodeWhere=n=>n.ip?n.ip:('mesh'+(n.rssi!=null?', '+n.rssi+' dBm':''));
 function panelNodes(){const p=E('div');
+ panelWardriveSection(p);
+ p.append(E('h2',{},'Nodes'));
  p.append(E('p',{style:'color:var(--dim);margin:0 0 10px'},'Other units running node_pwn (install it with Node_PWN.sh). Nodes in WiFi range show up here on their own, over pwnagotchi’s own mesh -- no shared network needed. Pair one to see its capture stats here; a paired node’s handshakes count as already covered on the Radar tab, so a group of units end up covering more ground instead of attacking the same network twice.'));
  const btn=E('button',{onclick:async()=>{if(nodesScanning)return;nodesScanning=true;btn.textContent='scanning…';btn.disabled=true;
   try{const r=await(await post('nodes/scan',{})).json();nodes={paired:r.paired,found:r.found}}catch(e){}
@@ -5427,9 +5415,9 @@ function panelSettings(){const p=E('div'),s=cfg.settings,d=cfg.display;
   idleOn?[field('after (minutes)',num(d.idle.minutes,v=>d.idle.minutes=v,1,240)),slider('dim to',[5,100,5],Math.round(d.idle.dim*100),v=>{d.idle.dim=v/100})]:null));
  p.append(E('div',{class:'row'},E('button',{id:'setsave',onclick:saveSettings},'Save settings')));
  return p}
-const PANELS={Colors:panelColors,Effects:panelEffects,Text:panelText,Elements:panelElements,Moods:panelMoods,Faces:panelFaces,JSON:panelJson,Layout:panelLayout,Awards:panelAwards,Cracking:panelCracking,Radar:panelRadar,Map:panelMap,Nodes:panelNodes,Wardrive:panelWardrive,Settings:panelSettings};
+const PANELS={Colors:panelColors,Effects:panelEffects,Text:panelText,Elements:panelElements,Moods:panelMoods,Faces:panelFaces,JSON:panelJson,Layout:panelLayout,Awards:panelAwards,Cracking:panelCracking,Radar:panelRadar,Map:panelMap,Nodes:panelNodes,Settings:panelSettings};
 function panel(){const p=$('panel');p.innerHTML='';p.append(PANELS[tab]());
- const t=$('tabs');t.innerHTML='';for(const n of TABS)t.append(E('button',{class:n===tab?'on':'',onclick:async()=>{tab=n;pickKey=null;$('pick').innerHTML='';$('pick').className='';pvMood=n==='Moods'?mood:null;if(n==='Elements'||n==='Moods'){try{info.entities=await(await fetch(base+'/api/entities')).json()}catch(e){}}if(n==='Layout')await loadLayout();if(n==='Awards')await loadAwards();if(n==='Cracking')await loadCracking();if(n==='Radar')await loadRadar();if(n==='Map')await loadLocations();if(n==='Nodes')await loadNodes();if(n==='Wardrive')await loadWardrive();if(n==='Settings')await loadSettings();panel();overlay();schedule()}},n))}
+ const t=$('tabs');t.innerHTML='';for(const n of TABS)t.append(E('button',{class:n===tab?'on':'',onclick:async()=>{tab=n;pickKey=null;$('pick').innerHTML='';$('pick').className='';pvMood=n==='Moods'?mood:null;if(n==='Elements'||n==='Moods'){try{info.entities=await(await fetch(base+'/api/entities')).json()}catch(e){}}if(n==='Layout')await loadLayout();if(n==='Awards')await loadAwards();if(n==='Cracking')await loadCracking();if(n==='Radar')await loadRadar();if(n==='Map')await loadLocations();if(n==='Nodes'){await loadNodes();await loadWardrive()}if(n==='Settings')await loadSettings();panel();overlay();schedule()}},n))}
 
 /* ---- drag text lines on the preview ---- */
 const est=t=>(t||'').replace(/\{time\}/g,'00:00:00').replace(/\{date\}/g,'0000-00-00').replace(/\{\w+\}/g,'0000').length;

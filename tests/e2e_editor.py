@@ -324,9 +324,7 @@ with sync_playwright() as p:
     check("a bad address shows the reason instead of silently failing", "could not reach" in (page.locator("#msg").inner_text() if page.locator("#msg").count() else ""))
     page.unroute("**/api/nodes/add")
 
-    tab("Wardrive")
-    page.wait_for_timeout(200)
-    check("the Wardrive tab loads with no browser error, nothing tracked yet",
+    check("the Wardrive section lives in this same Nodes tab, nothing tracked yet",
           page.locator("p:has-text('No track yet')").count() == 1 and page.locator("button:text-is('Start wardrive')").count() == 1)
     page.route("**/api/wardrive/start", lambda r: r.fulfill(
         body=json.dumps({"ok": True, "active": True, "started_at": 1.0, "ended_at": None, "distance_m": 0,

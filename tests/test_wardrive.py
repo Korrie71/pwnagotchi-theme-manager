@@ -118,15 +118,16 @@ tm4._display_cfg = T.clean_display({})
 finger = Panel(tm4)
 finger.calibrate()
 
-tm4.open_menu("list", "wardrive")
-ok("the wardrive tab opens", tm4._menu["tab"] == "wardrive" and tm4._menu["wardrive"]["active"] is False)
+tm4.open_menu("list", "nodes")
+ok("wardrive lives under the Nodes tab, not its own", tm4._menu["tab"] == "nodes" and tm4._menu["wardrive"]["active"] is False)
+ok("...as a row right after the summary", tm4._menu["nodes"][:2] == ["__summary__", "__wardrive__"])
 from PIL import Image  # noqa: E402
 T.draw_menu(Image.new("RGB", (480, 320)), tm4._menu, tm4._theme)
 ok("...and draws the stopped state without crashing", True)
 
-toggle_hit = finger.hit("wdtoggle")
+toggle_hit = finger.hit("noderow", "__wardrive__")
 finger.tap_rect(toggle_hit)
-ok("tapping the button starts a trip", tm4.wardrive_status()["active"] is True)
+ok("tapping the row starts a trip", tm4.wardrive_status()["active"] is True)
 ok("...and the menu reflects that right away", tm4._menu["wardrive"]["active"] is True)
 ok("...with a toast to confirm it", tm4._toast and "wardrive started" in tm4._toast[0], tm4._toast)
 

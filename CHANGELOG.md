@@ -1,5 +1,12 @@
 # Changelog
 
+## 2.16.1
+
+**Wardrive moved under the Nodes tab.** It shipped in 2.16.0 as its own standalone tab, but a trip log is really a
+Nodes concern -- it's for going out together with a paired unit. Both the touch menu and the web editor now show it
+as a row/section right at the top of the Nodes tab instead of a separate one; same start/stop button, same live
+stats, same behavior, just organized where it belongs. No settings or saved data changed.
+
 ## 2.16.0
 
 **Wardrive.** A new start/stop trip log: a breadcrumb trail from the gps plugin, plus distance, unique networks

@@ -232,7 +232,7 @@ def wait_scan(tm, seconds=3):
 
 
 tm3.open_menu("list", "nodes")
-ok("the nodes tab opens with nothing yet", tm3._menu["tab"] == "nodes" and len(tm3._menu["nodes"]) == 1)
+ok("the nodes tab opens with nothing yet", tm3._menu["tab"] == "nodes" and len(tm3._menu["nodes"]) == 2)
 T.draw_menu(__import__("PIL.Image", fromlist=["Image"]).new("RGB", (480, 320)), tm3._menu, tm3._theme)
 ok("...and draws the empty-state hint without crashing", True)
 
