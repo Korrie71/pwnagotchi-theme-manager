@@ -347,7 +347,13 @@ offline, is shown as offline rather than dropped or left showing stale numbers. 
 the node itself never initiates anything and never talks to any other node on its own. The one thing pairing
 actually changes: a network a paired, *online* node has already captured now also shows as covered on your own
 Radar, so a group of units end up covering more distinct ground instead of every unit attacking the same network.
-The web editor's Nodes tab does the same scanning and pairing.
+
+`scan` only ever probes your own local subnet, so it will never find a node on a different network. For that, the
+web editor's Nodes tab also has an **"add by address"** field: type in whatever address actually reaches it (an IP
+on a VPN/Tailscale you have both units joined to, or a port you have forwarded to it through your router) and it
+pairs immediately, no scan needed. It is still the same read-only status check either way — just told exactly where
+to look instead of guessing from the subnet. The touch menu can only scan (there is no keyboard to type an address
+with); use the web editor for a node that is not on the same network.
 
 Each handshake also gets a **quality** guess, worked out locally from the capture itself instead of waiting for
 wpa-sec: a full handshake, a PMKID (crackable without a client ever connecting), only a partial capture, or empty

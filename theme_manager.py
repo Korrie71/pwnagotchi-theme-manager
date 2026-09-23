@@ -585,6 +585,7 @@ def _local_ip():
 # --------------------------------------------------------------------- node scanning (see "node_pwn.py")
 NODE_PORT = 8080
 NODE_TIMEOUT = 0.4
+NODE_TIMEOUT_MANUAL = 4.0   # a deliberate, one-off add by address: no subnet sweep waiting on it, can afford to be patient
 NODE_SCAN_CAP = 512    # never scan more than this many addresses, however big the subnet looks
 
 
@@ -2798,7 +2799,7 @@ def _pwa_icon(size, theme):
 
 class ThemeManager(plugins.Plugin):
     __author__ = "theme_manager contributors"
-    __version__ = "2.14.0"
+    __version__ = "2.14.1"
     __license__ = "GPL3"
     __description__ = "Theme engine for the 3.5 inch display: colors, effects, animations, custom text, web GUI."
 
@@ -3558,6 +3559,22 @@ class ThemeManager(plugins.Plugin):
         _save_nodes(paired)
         return True
 
+    def add_node(self, host):
+        """Pair with a specific address directly, whether or not it is on the local subnet -- for a node that is
+        not reachable by the local scan (a different network, reached over a VPN/tunnel or a port forward). Unlike
+        pair_node this does not need a prior scan: it probes the address itself, patiently, right now."""
+        host = (host or "").strip()
+        if not host:
+            return False, "give an address"
+        info = _probe_node(host, timeout=NODE_TIMEOUT_MANUAL)
+        if not info:
+            return False, "could not reach a node_pwn unit there (check the address, and that it is running)"
+        with self._nodes_lock:
+            self._nodes_paired[info["mac"]] = dict(info, last_seen=time.time(), online=True)
+            paired = dict(self._nodes_paired)
+        _save_nodes(paired)
+        return True, info["name"]
+
     def unpair_node(self, mac):
         with self._nodes_lock:
             existed = self._nodes_paired.pop(mac, None) is not None
@@ -3567,11 +3584,13 @@ class ThemeManager(plugins.Plugin):
         return existed
 
     def refresh_paired_nodes(self):
-        """Re-probe every paired node at its last-known address, updating stats or marking it offline."""
+        """Re-probe every paired node at its last-known address, updating stats or marking it offline. Patient
+        (NODE_TIMEOUT_MANUAL), not the fast subnet-sweep timeout: this is a handful of addresses, not hundreds, and
+        a paired node reached over the internet rather than the LAN needs the extra time to answer at all."""
         with self._nodes_lock:
             targets = [(mac, info.get("ip")) for mac, info in self._nodes_paired.items()]
         for mac, ip in targets:
-            info = _probe_node(ip) if ip else None
+            info = _probe_node(ip, timeout=NODE_TIMEOUT_MANUAL) if ip else None
             with self._nodes_lock:
                 if mac not in self._nodes_paired:
                     continue
@@ -4607,6 +4626,10 @@ class ThemeManager(plugins.Plugin):
                     ok_ = self.pair_node(str(data.get("mac", "")))
                     paired, found = self.node_rows()
                     return jsonify({"ok": ok_, "paired": paired, "found": found})
+                if path == "api/nodes/add":
+                    ok_, msg = self.add_node(str(data.get("host", "")))
+                    paired, found = self.node_rows()
+                    return jsonify({"ok": ok_, "error": None if ok_ else msg, "paired": paired, "found": found})
                 if path == "api/nodes/unpair":
                     ok_ = self.unpair_node(str(data.get("mac", "")))
                     paired, found = self.node_rows()
@@ -5039,12 +5062,20 @@ function panelMap(){const p=E('div'),count=locations.rows.length;
 let nodes={paired:[],found:[]},nodesScanning=false;
 async function loadNodes(){try{nodes=await(await fetch(base+'/api/nodes')).json()}catch(e){}}
 function panelNodes(){const p=E('div');
- p.append(E('p',{style:'color:var(--dim);margin:0 0 10px'},'Other units running node_pwn (install it with Node_PWN.sh) on the same network. Pair one to see its capture stats here; a paired node’s handshakes count as already covered on the Radar tab, so a group of units end up covering more ground instead of attacking the same network twice.'));
+ p.append(E('p',{style:'color:var(--dim);margin:0 0 10px'},'Other units running node_pwn (install it with Node_PWN.sh). Pair one to see its capture stats here; a paired node’s handshakes count as already covered on the Radar tab, so a group of units end up covering more ground instead of attacking the same network twice.'));
  const btn=E('button',{onclick:async()=>{if(nodesScanning)return;nodesScanning=true;btn.textContent='scanning…';btn.disabled=true;
-  try{nodes=await(await post('nodes/scan',{})).json()}catch(e){}
+  try{const r=await(await post('nodes/scan',{})).json();nodes={paired:r.paired,found:r.found}}catch(e){}
   finally{nodesScanning=false;panel()}}},'Scan for nodes');
  p.append(btn);
- if(!nodes.paired.length&&!nodes.found.length){p.append(E('p',{style:'color:var(--dim);margin-top:10px'},'No nodes yet. Make sure another unit has node_pwn installed and is on the same network, then scan.'));return p}
+ p.append(E('p',{style:'color:var(--dim);margin:10px 0 4px;font-size:12px'},
+  'Scan only finds units on this same network. On a different one (a unit out wardriving on its own, say), add it directly if you can reach it -- over a VPN/Tailscale address, or a port you have forwarded to it:'));
+ const hostIn=E('input',{type:'text',placeholder:'address or address:port',style:'width:220px;margin-right:6px'});
+ const addBtn=E('button',{onclick:async()=>{const host=hostIn.value.trim();if(!host)return;addBtn.textContent='adding…';addBtn.disabled=true;
+  try{const r=await(await post('nodes/add',{host})).json();nodes={paired:r.paired,found:r.found};say(r.ok?'':(r.error||'could not add that node'))}
+  catch(e){say('could not add that node')}
+  finally{addBtn.textContent='Add';addBtn.disabled=false;panel()}}},'Add');
+ p.append(E('div',{class:'row',style:'margin-bottom:10px'},hostIn,addBtn));
+ if(!nodes.paired.length&&!nodes.found.length){p.append(E('p',{style:'color:var(--dim);margin-top:10px'},'No nodes yet. Scan, or add one by address above.'));return p}
  for(const n of nodes.paired){
   p.append(E('div',{class:'erow'+(n.online?' set':''),style:n.online?'':'opacity:.55'},
    E('span',{class:'ename',style:'width:170px'},(n.online?'● ':'○ ')+n.name),

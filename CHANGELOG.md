@@ -1,5 +1,14 @@
 # Changelog
 
+## 2.14.1
+
+**Fixed: pairing with a node on a different network.** Scanning for nodes only ever probed your own local subnet by
+design, but there was no other way to pair one at all -- so a node not on the same network (out wardriving on its
+own hotspot, say) simply could not be paired. The web editor's Nodes tab now has an **add by address** field:
+type in whatever address actually reaches it (a VPN/Tailscale IP, or a port forwarded to it) and it pairs right
+away, no scan involved. Same read-only status check as ever, just told where to look instead of guessing from the
+subnet. The touch menu still only scans (no keyboard there to type an address with).
+
 ## 2.14.0
 
 **Nodes: work together with other units.** A new companion, `node_pwn.py` (install with `Node_PWN.sh`), turns a

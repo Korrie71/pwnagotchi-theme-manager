@@ -107,4 +107,16 @@ code, j = call("api/nodes/unpair", {"mac": "02:00:00:00:00:09"})
 ok("nodes: unpairing works", code == 200 and j["ok"] and not j["paired"])
 T.scan_for_nodes = real_scan
 
+# nodes: adding one directly by address (not on the local subnet, so a scan would never find it)
+real_probe = T._probe_node
+T._probe_node = lambda host, **kw: {"node": "node_pwn", "version": "1.0.0", "name": "node-y", "mac": "02:00:00:00:00:0a",
+                                     "ip": host, "handshakes": 1, "bssids": []} if host == "203.0.113.5:8080" else None
+code, j = call("api/nodes/add", {"host": "203.0.113.5:8080"})
+ok("nodes: adding by address works with no prior scan", code == 200 and j["ok"] and j["paired"][0]["mac"] == "02:00:00:00:00:0a")
+code, j = call("api/nodes/add", {"host": "203.0.113.9:8080"})
+ok("nodes: an address nothing answers on fails cleanly with a reason", code == 200 and j["ok"] is False and j["error"])
+code, j = call("api/nodes/add", {"host": ""})
+ok("nodes: an empty address is refused, not a crash", code == 200 and j["ok"] is False)
+T._probe_node = real_probe
+
 finish()

@@ -88,6 +88,20 @@ tm2._display_cfg = T.clean_display({})
 paired2, _ = tm2.node_rows()
 ok("pairing survives a restart (loaded from nodes.json)", len(paired2) == 1 and paired2[0]["mac"] == "02:00:00:00:00:01")
 
+# ---------------------------------------------------------------- add_node: pair directly by address, no scan needed
+# (this is what makes a node on a different network usable at all: scanning only ever looks at the local subnet)
+ok_, msg = tm.add_node(addr_b)
+ok("adding by address pairs immediately, no scan required first", ok_ is True and msg == "node-b")
+paired, _ = tm.node_rows()
+ok("...and it shows up paired", any(p["mac"] == "02:00:00:00:00:02" for p in paired))
+ok_, msg = tm.add_node("")
+ok("an empty address is refused cleanly", ok_ is False and "address" in msg)
+ok_, msg = tm.add_node(addr_closed)
+ok("an address nothing answers on fails cleanly, not a crash", ok_ is False and "could not reach" in msg)
+ok_, msg = tm.add_node(addr_other)
+ok("an address that answers but is not node_pwn is also refused", ok_ is False)
+tm.unpair_node("02:00:00:00:00:02")
+
 # ---------------------------------------------------------------- refresh: online/offline, updated stats, and the shared bssid set
 srv_a.shutdown()   # node-a goes offline
 srv_a.server_close()

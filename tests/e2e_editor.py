@@ -278,6 +278,24 @@ with sync_playwright() as p:
     check("unpairing empties the list again", page.locator(".erow:has-text('zz-e2e-node')").count() == 0)
     page.unroute("**/api/nodes/unpair")
 
+    remote_node = {"node": "node_pwn", "version": "1.0.0", "name": "zz-e2e-remote", "mac": "02:00:00:00:00:0a",
+                   "ip": "203.0.113.5:8080", "handshakes": 2, "bssids": []}
+    page.route("**/api/nodes/add", lambda r: r.fulfill(body=json.dumps({"ok": True, "error": None, "paired": [dict(remote_node, online=True)], "found": []}),
+                                                         content_type="application/json"))
+    page.fill("input[placeholder='address or address:port']", "203.0.113.5:8080")
+    page.click("button:text-is('Add')")
+    page.wait_for_selector(".erow:has-text('zz-e2e-remote')")
+    check("adding a node by address works with no scan involved, e.g. a node on a different network",
+          page.locator(".erow:has-text('zz-e2e-remote') button:text-is('Unpair')").count() == 1)
+    page.unroute("**/api/nodes/add")
+    page.route("**/api/nodes/add", lambda r: r.fulfill(body=json.dumps({"ok": False, "error": "could not reach a node_pwn unit there", "paired": [], "found": []}),
+                                                         content_type="application/json"))
+    page.fill("input[placeholder='address or address:port']", "203.0.113.9:8080")
+    page.click("button:text-is('Add')")
+    page.wait_for_timeout(200)
+    check("a bad address shows the reason instead of silently failing", "could not reach" in (page.locator("#msg").inner_text() if page.locator("#msg").count() else ""))
+    page.unroute("**/api/nodes/add")
+
     settings0 = requests.get(URL + "api/settings").json()
     tab("Settings")
     page.wait_for_selector("#setsave")
