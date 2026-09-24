@@ -1,0 +1,63 @@
+{
+  "description": "ink on cream paper: a centered face in a rounded frame, like a sketch in a notebook",
+  "bg": "#f6f0dc",
+  "fg": "#1f2a44",
+  "accent": "#a33b3b",
+  "web": "#a33b3b",
+  "fps": 4,
+  "effects": [
+    {
+      "type": "noise",
+      "strength": 0.12
+    },
+    {
+      "type": "vignette",
+      "strength": 0.2
+    }
+  ],
+  "layout": {
+    "face": [
+      113,
+      24
+    ],
+    "name": [
+      197,
+      121
+    ],
+    "status": [
+      107,
+      16
+    ]
+  },
+  "panels": [
+    {
+      "type": "rect",
+      "x": 108,
+      "y": 60,
+      "w": 264,
+      "h": 116,
+      "outline": "accent",
+      "width": 2,
+      "radius": 14
+    },
+    {
+      "type": "line",
+      "x": 40,
+      "y": 236,
+      "x2": 300,
+      "y2": 236,
+      "color": "fg"
+    },
+    {
+      "type": "line",
+      "x": 40,
+      "y": 254,
+      "x2": 300,
+      "y2": 254,
+      "color": "fg"
+    }
+  ],
+  "elements": {
+    "name": "#a33b3b"
+  }
+}

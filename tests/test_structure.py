@@ -103,4 +103,19 @@ ok("a preview does not disturb the live layout", tm._ctx["layers"]["name"][1] ==
 tm._view = None
 ok("with no UI yet there is nothing to lay out", tm.render_structure(T._clean(theme())) is None)
 
+# ---------------------------------------------------------------- the themes shared in the project's themes/ folder
+import glob  # noqa: E402
+import json  # noqa: E402
+import os  # noqa: E402
+
+shared = sorted(glob.glob(os.path.join(T.ROOT if hasattr(T, "ROOT") else os.path.dirname(os.path.dirname(os.path.abspath(__file__))), "themes", "*.json")))
+ok("there are themes to share", len(shared) >= 6, len(shared))
+for path in shared:
+    name = os.path.basename(path)[:-5]
+    theme = json.load(open(path))
+    ok("shared theme %s: a valid name that does not shadow a bundled theme" % name, T.NAME_RE.fullmatch(name) and name not in T.BUILTIN)
+    ok("shared theme %s: passes the same checks as any theme, and has a description" % name, bool(T._clean(theme)) and bool(theme.get("description")))
+    ok("shared theme %s: uses structure, not just colors" % name, any(k in T._clean(theme) for k in ("layout", "hide", "sizes", "panels")))
+    ok("shared theme %s: the theme fits in a share link" % name, len(json.dumps(theme, indent=2)) < 3500)
+
 finish()

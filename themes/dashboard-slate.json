@@ -1,0 +1,70 @@
+{
+  "description": "side-by-side panels on slate blue: the face on the left, what it says on the right",
+  "bg": "#0e1621",
+  "fg": "#d6e4f0",
+  "accent": "#4fb3bf",
+  "web": "#4fb3bf",
+  "fps": 5,
+  "gradient": {
+    "from": "#0e1621",
+    "to": "#16283a",
+    "direction": "vertical"
+  },
+  "effects": [
+    {
+      "type": "vignette",
+      "strength": 0.35
+    }
+  ],
+  "layout": {
+    "face": [
+      8,
+      6
+    ],
+    "name": [
+      10,
+      74
+    ],
+    "status": [
+      174,
+      -124
+    ]
+  },
+  "sizes": {
+    "face": 0.72
+  },
+  "panels": [
+    {
+      "type": "rect",
+      "x": 8,
+      "y": 24,
+      "w": 210,
+      "h": 100,
+      "outline": "accent",
+      "width": 2,
+      "radius": 8
+    },
+    {
+      "type": "rect",
+      "x": 228,
+      "y": 24,
+      "w": 244,
+      "h": 100,
+      "outline": "fg",
+      "radius": 8
+    },
+    {
+      "type": "rect",
+      "x": 8,
+      "y": 132,
+      "w": 300,
+      "h": 132,
+      "outline": "fg",
+      "radius": 8
+    }
+  ],
+  "elements": {
+    "name": "#4fb3bf",
+    "status": "#ffd479"
+  }
+}

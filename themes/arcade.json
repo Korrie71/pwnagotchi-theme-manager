@@ -1,0 +1,77 @@
+{
+  "description": "a chunky arcade cabinet: bright colors, a bordered playfield and a big face",
+  "bg": "#12002b",
+  "fg": "#ffe600",
+  "accent": "#00e5ff",
+  "web": "#ff2d95",
+  "fps": 8,
+  "effects": [
+    {
+      "type": "stars",
+      "density": 0.4,
+      "speed": 3
+    },
+    {
+      "type": "border",
+      "size": 3,
+      "color": "#ff2d95"
+    },
+    {
+      "type": "glow",
+      "radius": 2,
+      "strength": 0.6
+    }
+  ],
+  "layout": {
+    "face": [
+      40,
+      22
+    ],
+    "name": [
+      197,
+      140
+    ],
+    "status": [
+      107,
+      20
+    ]
+  },
+  "sizes": {
+    "face": 1.3
+  },
+  "panels": [
+    {
+      "type": "rect",
+      "x": 20,
+      "y": 44,
+      "w": 440,
+      "h": 170,
+      "outline": "accent",
+      "width": 3,
+      "radius": 10
+    },
+    {
+      "type": "rect",
+      "x": 20,
+      "y": 220,
+      "w": 440,
+      "h": 8,
+      "fill": "accent"
+    }
+  ],
+  "elements": {
+    "face": "#ffe600",
+    "name": "#ff2d95",
+    "status": "#00e5ff"
+  },
+  "text": [
+    {
+      "text": "PLAYER 1  READY",
+      "x": 150,
+      "y": 246,
+      "size": 14,
+      "bold": true,
+      "color": "#ff2d95"
+    }
+  ]
+}

@@ -1,0 +1,75 @@
+{
+  "description": "green phosphor console: boxed in, a small face in the header, scanlines and a glow",
+  "bg": "#00100a",
+  "fg": "#5dffb0",
+  "accent": "#1fae6b",
+  "web": "#5dffb0",
+  "fps": 6,
+  "effects": [
+    "scanlines",
+    {
+      "type": "glow",
+      "radius": 2,
+      "strength": 0.7
+    },
+    {
+      "type": "vignette",
+      "strength": 0.5
+    }
+  ],
+  "layout": {
+    "face": [
+      5,
+      14
+    ],
+    "name": [
+      160,
+      24
+    ],
+    "status": [
+      -46,
+      -30
+    ]
+  },
+  "sizes": {
+    "face": 0.55
+  },
+  "hide": [
+    "line1",
+    "line2"
+  ],
+  "panels": [
+    {
+      "type": "rect",
+      "x": 4,
+      "y": 22,
+      "w": 472,
+      "h": 272,
+      "outline": "accent"
+    },
+    {
+      "type": "line",
+      "x": 4,
+      "y": 104,
+      "x2": 475,
+      "y2": 104,
+      "color": "accent"
+    },
+    {
+      "type": "rect",
+      "x": 4,
+      "y": 4,
+      "w": 472,
+      "h": 16,
+      "outline": "accent"
+    }
+  ],
+  "text": [
+    {
+      "text": "SONAR  {time}  cpu {cpu}  temp {temp}",
+      "x": 12,
+      "y": 270,
+      "size": 11
+    }
+  ]
+}

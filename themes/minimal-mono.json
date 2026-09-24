@@ -1,0 +1,44 @@
+{
+  "description": "white on black; only the face, the name and what it says",
+  "bg": "#000000",
+  "fg": "#f2f2f2",
+  "accent": "#f2f2f2",
+  "web": "#f2f2f2",
+  "layout": {
+    "face": [
+      91,
+      40
+    ],
+    "name": [
+      197,
+      150
+    ],
+    "status": [
+      107,
+      40
+    ]
+  },
+  "sizes": {
+    "face": 1.2
+  },
+  "hide": [
+    "channel",
+    "aps",
+    "bt-status",
+    "bt-detail",
+    "bat",
+    "SkyHigh",
+    "line1",
+    "line2",
+    "longitude",
+    "altitude",
+    "latitude",
+    "AgeStatus",
+    "Age",
+    "Points",
+    "Progress",
+    "Strength",
+    "pass",
+    "passwords"
+  ]
+}

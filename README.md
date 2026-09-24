@@ -26,7 +26,7 @@ with pwnagotchi's mood. Themes are small JSON files you can edit in a web editor
 
 ## Features
 
-- **Themes you install, that change the layout and not just the colors:** a fresh setup starts with none (the plain pwnagotchi screen); pick what you want from a **Gallery** with live previews, plus an online catalog. A theme can also move, resize and hide the screen's elements and draw its own panels (the bundled ones keep pwnagotchi's layout; see the two examples in `themes/`)
+- **Themes you install, that change the layout and not just the colors:** a fresh setup starts with none (the plain pwnagotchi screen); pick what you want from a **Gallery** with live previews, plus an online catalog. A theme can also move, resize and hide the screen's elements and draw its own panels (the bundled ones keep pwnagotchi's layout; see the themes in `themes/`)
 - **A theme store on the touch screen too:** browse, filter and install from the Themes tab, or scan a QR code to open the Gallery on your phone; a theme that needs a face pack brings it along, and you can **share** your own with one click
 - **A doctor:** the web editor's Doctor tab and the touch `doc` button say what looks wrong (a crash loop, a stuck WiFi driver, pwngrid or bt-tether failing, a plugin logging errors, a full disk) and what to do about it
 - **28 bundled themes, 20 with scenery** painted behind the text (the `scene` effect): mountains, ocean, forest, desert, volcano, aurora, the four seasons, a Star Trek console, an LCARS instrument panel, a neon city and more; a few even have a small animal wandering through (a dolphin, a whale, a fox, a scorpion, a penguin, an owl)
@@ -57,6 +57,10 @@ Everything below is rendered from made-up data (a fake name, fake stats) by the 
 regenerate the images with `python tools/make_screenshots.py`.
 
 ![Some of the bundled themes](docs/images/themes.png)
+
+**Shared themes** -- the ones in the project's `themes/` folder, which is what the Gallery's Online list installs. They use the layout fields, so each one arranges the screen its own way. Add yours with **Share**:
+
+![Themes shared in the themes folder](docs/images/themes-shared.png)
 
 And more, each with its own scenery: a Star Trek console, the seasons, landscapes and holidays.
 

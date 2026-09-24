@@ -46,6 +46,11 @@ more = ["startrek", "lcars", "spring", "summer", "autumn", "winter", "mountain",
         "halloween", "christmas", "space"]
 grid([(render(n), n) for n in more], 4, (360, 240)).save(os.path.join(OUT, "themes-more.png"), optimize=True)
 
+# ---- themes shared in the project's themes/ folder (the online list)
+import json  # noqa: E402
+shared = sorted(n[:-5] for n in os.listdir(os.path.join(ROOT, "themes")) if n.endswith(".json"))
+grid([(render(json.load(open(os.path.join(ROOT, "themes", n + ".json")))), n) for n in shared], 4, (360, 240)).save(os.path.join(OUT, "themes-shared.png"), optimize=True)
+
 # ---- face packs
 packs = [("blobby", faces.HAPPY, "blob: happy"), ("blobby", faces.SAD, "blob: sad"), ("blobby", faces.ANGRY, "blob: angry"),
          ("blobby", faces.COOL, "blob: cool"), ("sketch", faces.HAPPY, "outline (tinted): happy"),

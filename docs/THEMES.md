@@ -107,8 +107,10 @@ Element names are the ones on the web editor's Elements and Layout tabs (`face`,
 `uptime`, `line1`, `line2`, and whatever your plugins add). A name you do not have -- a plugin that is not installed --
 is simply ignored, so a theme made on one setup still works on another.
 
-None of the bundled themes use these: they keep pwnagotchi's own layout and only change colors and effects. The two
-examples in `themes/` (`neon-hacker` and `sunset`) show what a structured theme looks like. The web editor's
+None of the bundled themes use these: they keep pwnagotchi's own layout and only change colors and effects. The
+themes in the project's `themes/` folder (`dashboard-slate`, `poster-sunrise`, `minimal-mono`, `notebook`, `sonar-green`,
+`arcade`, `neon-hacker` and `sunset`) use them, and show what a structured theme looks like; they are what the Gallery's
+Online list installs. The web editor's
 **Structure** tab edits all of this without writing JSON (hide/show, size and move per element, add and remove boxes and
 lines; use the JSON tab for exact panel colors), and the Gallery previews show a theme's real layout.
 

@@ -1,0 +1,48 @@
+{
+  "description": "a huge face on a sunrise gradient and hardly anything else",
+  "bg": "#2b1136",
+  "fg": "#ffe8c2",
+  "accent": "#fff3d6",
+  "web": "#ff8a5b",
+  "fps": 5,
+  "gradient": {
+    "from": "#2b1136",
+    "to": "#ff7a45",
+    "direction": "vertical"
+  },
+  "effects": [
+    {
+      "type": "glow",
+      "radius": 3,
+      "strength": 0.6
+    }
+  ],
+  "layout": {
+    "face": [
+      57,
+      20
+    ],
+    "name": [
+      197,
+      160
+    ],
+    "status": [
+      107,
+      52
+    ]
+  },
+  "sizes": {
+    "face": 1.5
+  },
+  "hide": [
+    "line1",
+    "line2"
+  ],
+  "elements": {
+    "face": "#fff3d6",
+    "name": "#ffd1a8",
+    "status": "#fff3d6",
+    "shakes": "#2b1136",
+    "mode": "#2b1136"
+  }
+}
